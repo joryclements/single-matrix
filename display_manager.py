@@ -79,13 +79,11 @@ class DisplayManager:
         home_score = str(game['home_score'])
         away_score = str(game['away_score'])
         
-        # Use the game's sport as middle text when in SPORTS mode
-        if self.current_sport == "SPORTS":
-            middle_text = game_sport
+        # Show sport name in the center, but not for live or postponed MLB games only
+        if game["status"] == "Postponed" or (game_sport == "MLB" and game["status"] == "In Progress"):
+            middle_text = None
         else:
-            # Add sport name in the center, but not for live MLB games
-            if game["status"] != "In Progress" or game_sport != "MLB":
-                middle_text = game_sport
+            middle_text = game_sport
 
         # Calculate positions for text elements
         positions = calculate_text_positions(
@@ -119,6 +117,9 @@ class DisplayManager:
         elif game["status"] == "Scheduled":
             # Handle scheduled game display
             self._handle_scheduled_game(game, display_data, positions)
+        elif game["status"] == "Postponed":
+            # Handle postponed game display
+            self._handle_postponed_game(game, display_data, positions)
         else:
             # Handle in-progress game
             period = str(game.get('period', ''))
@@ -179,6 +180,26 @@ class DisplayManager:
         display_data['middle_row'][0]['text'] = ''
         display_data['middle_row'][-1]['text'] = ''
         display_data['bottom_row'].append({'text': time_part, 'color': WHITE, 'x': time_x})
+
+    def _handle_postponed_game(self, game, display_data, positions):
+        """Handle display for a postponed game"""
+        # Handle team records
+        away_record = game.get('away_record', '')
+        home_record = game.get('home_record', '')
+        away_record_wins, away_record_losses = parse_team_record(away_record)
+        home_record_wins, home_record_losses = parse_team_record(home_record)
+        
+        if away_record_wins and away_record_losses and home_record_wins and home_record_losses:
+            self._add_team_records(
+                display_data, positions,
+                away_record_wins, away_record_losses,
+                home_record_wins, home_record_losses
+            )
+        
+        # Update display data middle row to say Postponed and center it
+        display_data['middle_row'][0]['text'] = 'Postponed'
+        display_data['middle_row'][-1]['text'] = ''
+        display_data['middle_row'][0]['x'] = positions['center_x'] - (len('Postponed') * 6 // 2)
 
     def _add_team_records(self, display_data, positions, away_wins, away_losses, home_wins, home_losses):
         """Add team records to the display data"""
@@ -378,7 +399,7 @@ class DisplayManager:
         
         if not filtered_games:
             if self.show_all_games:
-                self.display_static_text(f"No {self.current_sport} Games")
+                self.display_static_text(f"No {self.current_sport}\nGames")
             else:
                 self.display_static_text(f"No Live\n{self.current_sport}")
             return
