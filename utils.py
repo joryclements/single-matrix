@@ -32,18 +32,33 @@ def get_team_color(team, current_sport):
 
 def format_game_time(date):
     """Format game time from various date formats to 12-hour time"""
-    if not date:
-        return "TBD"
-    if ' ' in date:
-        time_part = date.split(' ')[1][:5]
-    elif 'T' in date:
-        time_part = date.split('T')[1][:5]
-    else:
-        time_part = date
-    
     try:
-        hour, minute = time_part.split(':')
+        if not date:
+            return "TBD"
+            
+        # Safely extract time part
+        time_part = ""
+        if ' ' in date:
+            parts = date.split(' ')
+            if len(parts) > 1:
+                time_part = parts[1][:5] if len(parts[1]) >= 5 else parts[1]
+        elif 'T' in date:
+            parts = date.split('T')
+            if len(parts) > 1:
+                time_part = parts[1][:5] if len(parts[1]) >= 5 else parts[1]
+        else:
+            time_part = date
+        
+        if not time_part or ':' not in time_part:
+            return "TBD"
+            
+        time_parts = time_part.split(':')
+        if len(time_parts) < 2:
+            return "TBD"
+            
+        hour, minute = time_parts[0], time_parts[1]
         hour_int = int(hour)
+        
         if hour_int > 12:
             return f"{hour_int-12}:{minute}PM"
         elif hour_int == 12:
@@ -52,8 +67,10 @@ def format_game_time(date):
             return f"12:{minute}AM"
         else:
             return f"{hour_int}:{minute}AM"
-    except:
-        return time_part
+            
+    except Exception as e:
+        print(f"Error formatting time '{date}': {e}")
+        return "TBD"
 
 def parse_team_record(record):
     """Parse team record string into wins and losses"""

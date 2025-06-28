@@ -60,92 +60,111 @@ class DisplayManager:
 
     def create_game_text(self, game, middle_text=None):
         """Create the text to display for a game in scoreboard format"""
-        # Get team abbreviations and ensure they're uppercase for color lookup
-        home_team_abbr = str(game['home_team']).upper()
-        away_team_abbr = str(game['away_team']).upper()
+        try:
+            # Get team abbreviations and ensure they're uppercase for color lookup
+            home_team_abbr = str(game.get('home_team', 'UNK')).upper()
+            away_team_abbr = str(game.get('away_team', 'UNK')).upper()
         
-        # Determine the sport for this game (either from game or current setting)
-        game_sport = game.get('sport', self.current_sport)
+            # Determine the sport for this game (either from game or current setting)
+            game_sport = game.get('sport', self.current_sport)
+            
+            # Get team colors
+            home_color = get_team_color(home_team_abbr, game_sport)
+            away_color = get_team_color(away_team_abbr, game_sport)
+            
+            # Ensure team names are max 3 chars and not empty
+            home_team = home_team_abbr[:3] if home_team_abbr else "HOM"
+            away_team = away_team_abbr[:3] if away_team_abbr else "AWY"
+            
+            # Convert scores to strings with fallbacks
+            home_score = str(game.get('home_score', 0))
+            away_score = str(game.get('away_score', 0))
         
-        # Get team colors
-        home_color = get_team_color(home_team_abbr, game_sport)
-        away_color = get_team_color(away_team_abbr, game_sport)
-        
-        # Ensure team names are max 3 chars
-        home_team = home_team_abbr[:3]
-        away_team = away_team_abbr[:3]
-        
-        # Convert scores to strings
-        home_score = str(game['home_score'])
-        away_score = str(game['away_score'])
-        
-        # Show sport name in the center, but not for live or postponed MLB games only
-        if game["status"] == "Postponed" or (game_sport == "MLB" and game["status"] == "In Progress"):
-            middle_text = None
-        else:
-            middle_text = game_sport
+            # Show sport name in the center, but not for live/postponed/delayed MLB games
+            if (game.get("status") in ["Postponed", "Delayed", "Suspended", "Cancelled"] or 
+                (game_sport == "MLB" and game.get("status") == "In Progress")):
+                middle_text = None
+            else:
+                middle_text = game_sport
 
-        # Calculate positions for text elements
-        positions = calculate_text_positions(
-            home_team, away_team, home_score, away_score,
-            char_width=6, padding=2, display_width=DISPLAY_WIDTH
-        )
-        
-        display_data = {    
-            'top_row': [
-            {'text': away_team, 'color': away_color, 'x': positions['away_x']},
-            {'text': home_team, 'color': home_color, 'x': positions['home_x']}
-            ],
-            'middle_row': [
-                {'text': away_score, 'color': WHITE, 'x': positions['away_score_x']},
-                {'text': home_score, 'color': WHITE, 'x': positions['home_score_x']},
-            ],
-            'bottom_row': []
+            # Calculate positions for text elements
+            positions = calculate_text_positions(
+                home_team, away_team, home_score, away_score,
+                char_width=6, padding=2, display_width=DISPLAY_WIDTH
+            )
+            
+            display_data = {    
+                'top_row': [
+                {'text': away_team, 'color': away_color, 'x': positions['away_x']},
+                {'text': home_team, 'color': home_color, 'x': positions['home_x']}
+                ],
+                'middle_row': [
+                    {'text': away_score, 'color': WHITE, 'x': positions['away_score_x']},
+                    {'text': home_score, 'color': WHITE, 'x': positions['home_score_x']},
+                ],
+                'bottom_row': []
+                }
+            
+            # Add middle text if provided
+            if middle_text:
+                middle_width = len(middle_text) * 6
+                middle_x = positions['center_x'] - (middle_width // 2)
+                display_data['middle_row'].insert(1, {'text': middle_text, 'color': DIM_GRAY, 'x': middle_x})
+
+            # Handle game status and get clock text
+            clock_text = handle_game_status(game, display_data, positions['center_x'], 6)
+            
+            game_status = game.get("status", "Unknown")
+            
+            if game_status == "Final":
+                # Handle final game display (winner colors, records)
+                self._handle_final_game(game, display_data, positions)
+            elif game_status == "Scheduled":
+                # Handle scheduled game display
+                self._handle_scheduled_game(game, display_data, positions)
+            elif game_status in ["Postponed", "Delayed", "Suspended", "Cancelled", "Unknown"]:
+                # Handle postponed/delayed/suspended/cancelled/unknown game display
+                self._handle_delayed_game(game, display_data, positions)
+            else:
+                # Handle in-progress game or unknown status
+                period = str(game.get('period', ''))
+                period_width = len(period) * 6
+                period_x = positions['center_x'] - (period_width // 2)
+                display_data['top_row'].insert(1, {'text': period, 'color': WHITE, 'x': period_x})
+                
+                # Handle sport-specific display
+                if game_sport == "NFL":
+                    clock_text = handle_nfl_display(game, display_data, home_team, away_team) or clock_text
+                elif game_sport == "MLB":
+                    clock_text = handle_mlb_display(
+                        game, display_data, period, home_team, away_team,
+                        home_color, away_color, create_underline,
+                        lambda bases: create_baseball_diamond(self.base_bitmap, self.base_palette, bases),
+                        positions['away_x'], positions['home_x'], positions['center_x'],
+                        positions['away_score_x'], positions['home_score_x']
+                    ) or clock_text
+                
+                # Add clock text if available
+                if clock_text:
+                    clock_width = len(clock_text) * 6
+                    clock_x = positions['center_x'] - (clock_width // 2)
+                    display_data['bottom_row'].append({'text': clock_text, 'color': WHITE, 'x': clock_x})
+            
+            return display_data
+            
+        except Exception as e:
+            print(f"Error creating game text: {e}")
+            # Return a minimal safe display structure
+            return {
+                'top_row': [
+                    {'text': 'ERR', 'color': WHITE, 'x': 5},
+                    {'text': 'ERR', 'color': WHITE, 'x': 45}
+                ],
+                'middle_row': [
+                    {'text': 'Game Error', 'color': WHITE, 'x': 8}
+                ],
+                'bottom_row': []
             }
-        # Add middle text if provided
-        if middle_text:
-            middle_width = len(middle_text) * 6
-            middle_x = positions['center_x'] - (middle_width // 2)
-            display_data['middle_row'].insert(1, {'text': middle_text, 'color': DIM_GRAY, 'x': middle_x})
-
-        # Handle game status and get clock text
-        clock_text = handle_game_status(game, display_data, positions['center_x'], 6)
-        
-        if game["status"] == "Final":
-            # Handle final game display (winner colors, records)
-            self._handle_final_game(game, display_data, positions)
-        elif game["status"] == "Scheduled":
-            # Handle scheduled game display
-            self._handle_scheduled_game(game, display_data, positions)
-        elif game["status"] == "Postponed":
-            # Handle postponed game display
-            self._handle_postponed_game(game, display_data, positions)
-        else:
-            # Handle in-progress game
-            period = str(game.get('period', ''))
-            period_width = len(period) * 6
-            period_x = positions['center_x'] - (period_width // 2)
-            display_data['top_row'].insert(1, {'text': period, 'color': WHITE, 'x': period_x})
-            
-            # Handle sport-specific display
-            if game_sport == "NFL":
-                clock_text = handle_nfl_display(game, display_data, home_team, away_team) or clock_text
-            elif game_sport == "MLB":
-                clock_text = handle_mlb_display(
-                    game, display_data, period, home_team, away_team,
-                    home_color, away_color, create_underline,
-                    lambda bases: create_baseball_diamond(self.base_bitmap, self.base_palette, bases),
-                    positions['away_x'], positions['home_x'], positions['center_x'],
-                    positions['away_score_x'], positions['home_score_x']
-                ) or clock_text
-            
-            # Add clock text if available
-            if clock_text:
-                clock_width = len(clock_text) * 6
-                clock_x = positions['center_x'] - (clock_width // 2)
-                display_data['bottom_row'].append({'text': clock_text, 'color': WHITE, 'x': clock_x})
-        
-        return display_data
 
     def _handle_final_game(self, game, display_data, positions):
         """Handle display for a final game"""
@@ -181,8 +200,8 @@ class DisplayManager:
         display_data['middle_row'][-1]['text'] = ''
         display_data['bottom_row'].append({'text': time_part, 'color': WHITE, 'x': time_x})
 
-    def _handle_postponed_game(self, game, display_data, positions):
-        """Handle display for a postponed game"""
+    def _handle_delayed_game(self, game, display_data, positions):
+        """Handle display for postponed/delayed/suspended/cancelled games"""
         # Handle team records
         away_record = game.get('away_record', '')
         home_record = game.get('home_record', '')
@@ -196,10 +215,62 @@ class DisplayManager:
                 home_record_wins, home_record_losses
             )
         
-        # Update display data middle row to say Postponed and center it
-        display_data['middle_row'][0]['text'] = 'Postponed'
+        # Get status and create appropriate display text
+        status = game.get('status', 'Unknown')
+        display_text = self._get_status_display_text(status)
+        
+        # Update display data middle row with status and center it
+        display_data['middle_row'][0]['text'] = display_text
         display_data['middle_row'][-1]['text'] = ''
-        display_data['middle_row'][0]['x'] = positions['center_x'] - (len('Postponed') * 6 // 2)
+        display_data['middle_row'][0]['x'] = positions['center_x'] - (len(display_text) * 6 // 2)
+        
+        # If there are scores, show them (for delayed games that were in progress)
+        try:
+            home_score = int(game.get('home_score', 0))
+            away_score = int(game.get('away_score', 0))
+        except (ValueError, TypeError):
+            home_score = away_score = 0
+            
+        if home_score > 0 or away_score > 0:
+            display_data['middle_row'][0]['text'] = str(away_score)
+            display_data['middle_row'][-1]['text'] = str(home_score)
+            display_data['middle_row'][0]['x'] = positions['away_score_x']
+            display_data['middle_row'][-1]['x'] = positions['home_score_x']
+            
+            # Add status as bottom text
+            display_data['bottom_row'].append({
+                'text': display_text, 
+                'color': DIM_GRAY, 
+                'x': positions['center_x'] - (len(display_text) * 6 // 2)
+            })
+    
+    def _get_status_display_text(self, status):
+        """Convert status to appropriate display text (max 5 chars for screen space)"""
+        status_map = {
+            'Postponed': 'POSTPONED',
+            'Delayed': 'DELAY',
+            'Suspended': 'SUSPENDED', 
+            'Cancelled': 'CANCELLED',
+            'Rain Delay': 'RAIN DELAY',
+            'Weather Delay': 'RAIN DELAY',  # Use RAIN DELAY for all weather delays
+            'Unknown': 'UNKNOWN'
+        }
+        
+        # Check if status contains certain keywords for better mapping
+        status_lower = status.lower()
+        if 'rain' in status_lower or 'weather' in status_lower:
+            return 'RAIN DELAY'  # Use full RAIN DELAY text
+        elif 'delay' in status_lower:
+            return 'DELAY'
+        elif 'suspend' in status_lower:
+            return 'SUSPENDED'
+        elif 'cancel' in status_lower:
+            return 'CANCELLED'
+        elif 'postpone' in status_lower:
+            return 'POSTPONED'
+        
+        # Use mapping or truncate long status to reasonable length
+        return status_map.get(status, status[:10].upper())
 
     def _add_team_records(self, display_data, positions, away_wins, away_losses, home_wins, home_losses):
         """Add team records to the display data"""
@@ -237,51 +308,99 @@ class DisplayManager:
             )
 
     async def display_scoreboard(self, display_data):
-        """Display multi-line text in scoreboard format"""
-       # print(f"Displaying scoreboard" + str(display_data))
-        
-        # Create the display group
-        display_group = displayio.Group()
-        
-        # Create labels for each line with better vertical spacing
-        y_positions = [5, 16, 27]  # More evenly spaced positions
-        
-        # Display top row
-        for item in display_data['top_row']:
-            label = self.create_text_label(item['text'], item['color'], x=item['x'], y=y_positions[0])
-            display_group.append(label)
-        
-        # Add the underline if it exists
-        if 'underline' in display_data:
-            print(f"Adding underline: {display_data['underline']}")
-            display_group.append(display_data['underline'])
-        
-        # Add the baseball diamond if it exists
-        if 'diamond' in display_data:
-            display_group.append(display_data['diamond'])
+        """Display multi-line text in scoreboard format with error recovery"""
+        try:
+            # Validate display_data structure
+            if not isinstance(display_data, dict):
+                print("Invalid display_data: not a dictionary")
+                self.display_static_text("Data\nError")
+                return
+                
+            # Ensure required keys exist
+            required_keys = ['top_row', 'middle_row', 'bottom_row']
+            for key in required_keys:
+                if key not in display_data:
+                    display_data[key] = []
             
-        # Add the record separators if they exist
-        if 'separators' in display_data:
-            for separator in display_data['separators']:
-                display_group.append(separator)
-        
-        # Display middle row
-        for item in display_data['middle_row']:
-            if item['text']:  # Only display non-empty text
-                label = self.create_text_label(item['text'], item['color'], x=item['x'], y=y_positions[1])
-                display_group.append(label)
-        
-        # Display bottom row
-        for item in display_data['bottom_row']:
-            if item['text']:  # Only display non-empty text
-                label = self.create_text_label(item['text'], item['color'], x=item['x'], y=y_positions[2])
-                display_group.append(label)
-        
-        # Set as root group
-        self.display.root_group = display_group
-        
-        # Keep display static for 8 seconds
-        await asyncio.sleep(8)
+            # Create the display group
+            display_group = displayio.Group()
+            
+            # Create labels for each line with better vertical spacing
+            y_positions = [5, 16, 27]  # More evenly spaced positions
+            
+            # Display top row
+            try:
+                for item in display_data['top_row']:
+                    if isinstance(item, dict) and 'text' in item:
+                        label = self.create_text_label(
+                            str(item['text']), 
+                            item.get('color', WHITE), 
+                            x=item.get('x', 0), 
+                            y=y_positions[0]
+                        )
+                        display_group.append(label)
+            except Exception as e:
+                print(f"Error rendering top row: {e}")
+            
+            # Add special display elements safely
+            try:
+                # Add the underline if it exists
+                if 'underline' in display_data:
+                    display_group.append(display_data['underline'])
+                
+                # Add the baseball diamond if it exists
+                if 'diamond' in display_data:
+                    display_group.append(display_data['diamond'])
+                    
+                # Add the record separators if they exist
+                if 'separators' in display_data:
+                    for separator in display_data['separators']:
+                        display_group.append(separator)
+            except Exception as e:
+                print(f"Error adding special elements: {e}")
+            
+            # Display middle row
+            try:
+                for item in display_data['middle_row']:
+                    if isinstance(item, dict) and 'text' in item and item['text']:
+                        label = self.create_text_label(
+                            str(item['text']), 
+                            item.get('color', WHITE), 
+                            x=item.get('x', 0), 
+                            y=y_positions[1]
+                        )
+                        display_group.append(label)
+            except Exception as e:
+                print(f"Error rendering middle row: {e}")
+            
+            # Display bottom row
+            try:
+                for item in display_data['bottom_row']:
+                    if isinstance(item, dict) and 'text' in item and item['text']:
+                        label = self.create_text_label(
+                            str(item['text']), 
+                            item.get('color', WHITE), 
+                            x=item.get('x', 0), 
+                            y=y_positions[2]
+                        )
+                        display_group.append(label)
+            except Exception as e:
+                print(f"Error rendering bottom row: {e}")
+            
+            # Set as root group
+            try:
+                self.display.root_group = display_group
+            except Exception as e:
+                print(f"Error setting display group: {e}")
+                self.display_static_text("Display\nFailed")
+                return
+            
+            # Keep display static for 8 seconds
+            await asyncio.sleep(8)
+            
+        except Exception as e:
+            print(f"Critical error in display_scoreboard: {e}")
+            self.display_static_text("Render\nError")
 
     def stop_display(self):
         """Stop any active display"""
@@ -363,64 +482,123 @@ class DisplayManager:
         return (True, True)  # Signal that data should be fetched immediately and display should be reset
         
     async def update_games(self):
-        """Update games from API"""
+        """Update games from API with error recovery"""
         try:
             if self.current_sport == "SPORTS":
                 # Fetch games from all sports
-                self.games = []
+                new_games = []
+                successful_sports = 0
                 for sport in ["NFL", "NBA", "NHL", "MLB"]:
-                    sport_games = await self.api.get_games(sport)
-                    # Add sport identifier to each game
-                    for game in sport_games:
-                        game["sport"] = sport
-                    if sport_games is not None:
-                        self.games.extend(sport_games)
-                print(f"Updated games: {len(self.games)} games from all sports found")
+                    try:
+                        sport_games = await self.api.get_games(sport)
+                        if sport_games:
+                            # Add sport identifier to each game
+                            for game in sport_games:
+                                if isinstance(game, dict):  # Validate game is a dict
+                                    game["sport"] = sport
+                                    new_games.append(game)
+                            successful_sports += 1
+                            print(f"Fetched {len(sport_games)} {sport} games")
+                    except Exception as e:
+                        print(f"Failed to fetch {sport} games: {e}")
+                        continue
+                
+                if new_games:
+                    self.games = new_games
+                    print(f"Updated games: {len(self.games)} games from {successful_sports}/4 sports")
+                elif not self.games:  # Only show error if we have no cached games
+                    print("No games available from any sport")
             else:
                 # Regular single sport fetch
-                new_games = await self.api.get_games(self.current_sport)
-                if new_games is not None:  # Only update if we got valid data
-                    # Add sport identifier to each game
-                    for game in new_games:
-                        game["sport"] = self.current_sport
-                    self.games = new_games
-                    print(f"Updated games: {len(self.games)} {self.current_sport} games found")
-                else:
-                    print("No games data received from API")
+                try:
+                    new_games = await self.api.get_games(self.current_sport)
+                    if new_games:  # Only update if we got valid data
+                        # Validate and add sport identifier
+                        valid_games = []
+                        for game in new_games:
+                            if isinstance(game, dict):
+                                game["sport"] = self.current_sport
+                                valid_games.append(game)
+                        
+                        if valid_games:
+                            self.games = valid_games
+                            print(f"Updated games: {len(self.games)} {self.current_sport} games found")
+                        else:
+                            print("No valid games received from API")
+                    else:
+                        print("No games data received from API")
+                except Exception as e:
+                    print(f"Error fetching {self.current_sport} games: {e}")
         except Exception as e:
-            print(f"Error updating games: {e}")
+            print(f"Critical error updating games: {e}")
             
     async def display_current_game(self):
-        """Display the current game"""
-        filtered_games = self.get_filtered_games()
-        total_games = len(filtered_games)
-        
-        print(f"Display current game: {self.current_game_index + 1}/{total_games} games")
-        
-        if not filtered_games:
-            if self.show_all_games:
-                self.display_static_text(f"No {self.current_sport}\nGames")
-            else:
-                self.display_static_text(f"No Live\n{self.current_sport}")
-            return
+        """Display the current game with error recovery"""
+        try:
+            filtered_games = self.get_filtered_games()
+            total_games = len(filtered_games)
             
-        # Ensure index is valid
-        if self.current_game_index >= total_games:
-            self.current_game_index = 0
+            print(f"Display current game: {self.current_game_index + 1}/{total_games} games")
             
-        game = filtered_games[self.current_game_index]
-        print(f"Showing game: {game['home_team']} vs {game['away_team']} - Status: {game['status']}")
-        
-        game_text_lines = self.create_game_text(game)
-        
-        # Stop any existing display
-        self.stop_display()
-        
-        # Start new display task
-        self.display_task = asyncio.create_task(self.display_scoreboard(game_text_lines))
-        
-        # Update index for next time
-        self.current_game_index = (self.current_game_index + 1) % total_games
+            if not filtered_games:
+                if self.show_all_games:
+                    self.display_static_text(f"No {self.current_sport}\nGames")
+                else:
+                    self.display_static_text(f"No Live\n{self.current_sport}")
+                return
+                
+            # Ensure index is valid
+            if self.current_game_index >= total_games:
+                self.current_game_index = 0
+                
+            game = filtered_games[self.current_game_index]
+            
+            # Validate game data before processing
+            if not self._validate_game_data(game):
+                print(f"Invalid game data, skipping: {game}")
+                self.current_game_index = (self.current_game_index + 1) % total_games
+                return
+                
+            print(f"Showing game: {game['home_team']} vs {game['away_team']} - Status: {game['status']}")
+            
+            try:
+                game_text_lines = self.create_game_text(game)
+                
+                # Stop any existing display
+                self.stop_display()
+                
+                # Start new display task
+                self.display_task = asyncio.create_task(self.display_scoreboard(game_text_lines))
+                
+            except Exception as e:
+                print(f"Error creating display for game: {e}")
+                self.display_static_text("Display\nError")
+                
+            # Update index for next time
+            self.current_game_index = (self.current_game_index + 1) % total_games
+            
+        except Exception as e:
+            print(f"Critical error in display_current_game: {e}")
+            self.display_static_text("Game\nError")
+
+    def _validate_game_data(self, game):
+        """Validate essential game data fields"""
+        try:
+            required_fields = ['home_team', 'away_team', 'status']
+            for field in required_fields:
+                if field not in game or game[field] is None:
+                    print(f"Missing required field: {field}")
+                    return False
+            
+            # Ensure team names are strings
+            if not isinstance(game['home_team'], str) or not isinstance(game['away_team'], str):
+                print("Invalid team name types")
+                return False
+                
+            return True
+        except Exception as e:
+            print(f"Error validating game data: {e}")
+            return False
 
     def get_filtered_games(self):
         """Get games filtered by current settings"""
@@ -438,15 +616,16 @@ class DisplayManager:
             print(f"Showing all games: {len(self.games)} games")
             return self.games
         else:
-            # Consider any game not Final or Scheduled as active
-            active_games = [g for g in self.games if g["status"] not in ["Final", "Scheduled"]]
+            # Consider active/live games: In Progress, Delayed, Suspended, Unknown (treated as active)
+            active_statuses = ["In Progress", "Delayed", "Suspended", "Unknown"]
+            active_games = [g for g in self.games if g["status"] in active_statuses]
             
             if active_games:
                 # If we have active games, show only those
-                print(f"Showing active games: {len(active_games)} games")
+                print(f"Showing active/live games: {len(active_games)} games")
                 return active_games
             else:
-                # If no active games, show scheduled games
+                # If no active games, show upcoming scheduled games
                 scheduled_games = [g for g in self.games if g["status"] == "Scheduled"]
                 print(f"No active games found. Showing scheduled games: {len(scheduled_games)} games")
                 return scheduled_games

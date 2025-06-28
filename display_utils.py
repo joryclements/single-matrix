@@ -138,13 +138,13 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
         del display_data['underline']
 
     # Handle batting team indicator
-    if period[0].lower() == 't':
+    if period and len(period) > 0 and period[0].lower() == 't':
         # Away team is batting
         underline = create_underline_fn(len(away_team) * 6 - 1, away_color)
         underline.x = away_x
         underline.y = 9  # Just below the team name
         display_data['underline'] = underline
-    elif period[0].lower() == 'b':
+    elif period and len(period) > 0 and period[0].lower() == 'b':
         # Home team is batting
         underline = create_underline_fn(len(home_team) * 6 - 1, home_color)
         underline.x = home_x
