@@ -2,6 +2,8 @@ import ssl
 import wifi
 import socketpool
 import adafruit_requests
+import time
+import rtc
 
 class SportsAPI:
     def __init__(self, api_key):
@@ -31,10 +33,20 @@ class SportsAPI:
         """Process the raw games data into a simplified format"""
         processed_games = []
         
+        # Get current time and 24-hour window (in seconds since epoch)
+        # Use RTC to get actual current time, not uptime
+        current_time = rtc.RTC().datetime
+        # Convert struct_time to timestamp (year, month, day, hour, minute, second, weekday, yearday, dst)
+        now_tuple = (current_time.tm_year, current_time.tm_mon, current_time.tm_mday, 
+                     current_time.tm_hour, current_time.tm_min, current_time.tm_sec, 0, 0, -1)
+        now = time.mktime(now_tuple)
+        twenty_four_hours_seconds = 24 * 60 * 60  # 24 hours in seconds
+        
         # print(f"Processing {len(games)} games from API")
         
         for game in games:
             raw_status = game.get("status", "Unknown")
+            
             
             # Get all relevant fields with proper fallbacks
             # Common fields across all sports
@@ -90,6 +102,37 @@ class SportsAPI:
                 status = "In Progress"
             else:
                 status = raw_status
+            
+            # Filter games to only show those within 24-hour window
+            if date:
+                try:
+                    # Parse the game date (format: "2025-09-04 20:20:00")
+                    # Convert to time tuple then to timestamp
+                    year, month, day = int(date[:4]), int(date[5:7]), int(date[8:10])
+                    hour, minute = int(date[11:13]), int(date[14:16])
+                    
+                    # Create time tuple (year, month, day, hour, minute, second, weekday, yearday, dst)
+                    game_time_tuple = (year, month, day, hour, minute, 0, 0, 0, -1)
+                    game_timestamp = time.mktime(game_time_tuple)
+                    
+                    # Apply 24-hour window filtering to all games based on status
+                    if status == "Scheduled":
+                        # Skip scheduled games more than 24 hours from now
+                        if game_timestamp > now + twenty_four_hours_seconds:
+                            continue
+                    elif status == "Final":
+                        # Skip final games older than 24 hours (only show games from past 24 hours)
+                        if game_timestamp < now - twenty_four_hours_seconds:
+                            continue
+                    else:
+                        # For any other status (postponed, etc.), apply same 24-hour window as final games
+                        if game_timestamp < now - twenty_four_hours_seconds:
+                            continue
+                        
+                except (ValueError, IndexError):
+                    # If date parsing fails, skip the game to be safe
+                    print(f"Could not parse date for game: {date}")
+                    continue
             
             processed_game = {
                 "home_team": home_team,

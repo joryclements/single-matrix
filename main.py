@@ -4,6 +4,10 @@ import asyncio
 import board
 import digitalio
 import time
+import rtc
+import socketpool
+import ssl
+import adafruit_requests
 from adafruit_matrixportal.matrix import Matrix
 from api import SportsAPI
 from display_manager import DisplayManager
@@ -28,6 +32,31 @@ button_down.pull = digitalio.Pull.UP
 print("Connecting to WiFi...")
 wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
 print(f"Connected to WiFi! IP: {wifi.radio.ipv4_address}")
+
+# Synchronize time using world time API
+print("Synchronizing time...")
+try:
+    pool = socketpool.SocketPool(wifi.radio)
+    requests = adafruit_requests.Session(pool, ssl.create_default_context())
+    response = requests.get("http://worldtimeapi.org/api/timezone/UTC")
+    if response.status_code == 200:
+        time_data = response.json()
+        # Parse datetime string like "2024-06-28T15:30:45.123456+00:00"
+        datetime_str = time_data["datetime"][:19]  # Get just "2024-06-28T15:30:45"
+        year = int(datetime_str[0:4])
+        month = int(datetime_str[5:7])
+        day = int(datetime_str[8:10])
+        hour = int(datetime_str[11:13])
+        minute = int(datetime_str[14:16])
+        second = int(datetime_str[17:19])
+        
+        # Set RTC time (year, month, day, hour, minute, second, weekday, yearday)
+        rtc.RTC().datetime = time.struct_time((year, month, day, hour, minute, second, 0, 0, -1))
+        print(f"Time synchronized: {rtc.RTC().datetime}")
+    else:
+        print(f"Failed to get time: {response.status_code}")
+except Exception as e:
+    print(f"Time sync failed: {e}")
 
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
