@@ -11,6 +11,7 @@ import adafruit_requests
 from adafruit_matrixportal.matrix import Matrix
 from api import SportsAPI
 from display_manager import DisplayManager
+from comprehensive_display_test import run_comprehensive_display_test
 # Constants
 DISPLAY_WIDTH = 64
 DISPLAY_HEIGHT = 32
@@ -108,9 +109,10 @@ async def check_buttons():
         fetch_data, reset_display = display_manager.toggle_game_display()
         if fetch_data or reset_display:
             last_button_up_time = current_time
-            # Wait for message to be visible and fetch data
-            await asyncio.sleep(2)  # Show message for 2 seconds
+            
+            # Fetch data
             await display_manager.update_games()
+            
             # Reset display timers by returning True
             fetch_data = True
     
@@ -123,14 +125,24 @@ async def check_buttons():
         fetch_data, reset_display = display_manager.toggle_sport()
         if fetch_data or reset_display:
             last_button_down_time = current_time
-            # Wait for message to be visible and fetch data
-            await asyncio.sleep(2)  # Show message for 2 seconds
+            # Fetch data
             await display_manager.update_games()
+            
             # Reset display timers by returning True
             fetch_data = True
     
     last_button_down_state = current_button_down_state
     return fetch_data
+
+async def run_comprehensive_test():
+    """Run the comprehensive test suite"""
+    print("🚀 Starting Comprehensive Test Suite...")
+    await run_comprehensive_display_test(display_manager, "comprehensive")
+
+async def run_quick_test():
+    """Run a quick test suite"""
+    print("⚡ Starting Quick Test Suite...")
+    await run_comprehensive_display_test(display_manager, "quick")
 
 async def main():
     """Main program loop"""
@@ -140,8 +152,10 @@ async def main():
         await asyncio.sleep(0.5)
         
         # Fetch initial data with error handling
-        print("Fetching initial data...")
+        print("Starting display...")
+        
         try:
+            # Fetch data
             await display_manager.update_games()
         except Exception as e:
             print(f"Error fetching initial data: {e}")

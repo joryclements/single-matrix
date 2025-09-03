@@ -163,11 +163,9 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
         # Store the diamond in a special key for the display function
         display_data['diamond'] = diamond
         
-        # Keep scores in middle row
-        display_data['middle_row'] = [
-            {'text': game['away_score'], 'color': WHITE, 'x': away_score_x},
-            {'text': game['home_score'], 'color': WHITE, 'x': home_score_x}
-        ]
+        # For live MLB games, we want to show count/bases in middle row
+        # The scores will be handled by the main create_game_text function
+        # So we don't overwrite the middle row here
 
     # Format count display
     count_dict = game.get('count', {})

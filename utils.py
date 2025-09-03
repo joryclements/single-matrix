@@ -13,8 +13,6 @@ def get_team_color(team, current_sport):
         
     team_key = str(team).upper()
     
-    print(f"Getting color for team: {team_key} in sport: {current_sport}")
-    
     if current_sport == "NBA":
         colors = NBA_COLORS
     elif current_sport == "NFL":

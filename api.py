@@ -241,10 +241,11 @@ class SportsAPI:
                         game_time_tuple = (year, month, day, hour, minute, 0, 0, 0, -1)
                         game_timestamp = time.mktime(game_time_tuple)
                         
-                        # Apply 24-hour window filtering to all games based on status
+                        # Apply time window filtering to all games based on status
                         if status == "Scheduled":
-                            # Skip scheduled games more than 24 hours from now
-                            if game_timestamp > now + twenty_four_hours_seconds:
+                            # Skip scheduled games more than 22 hours from now to avoid confusion
+                            twenty_hours_seconds = 20 * 60 * 60
+                            if game_timestamp > now + twenty_hours_seconds:
                                 continue
                         elif status == "Final":
                             # Skip final games older than 24 hours (only show games from past 24 hours)

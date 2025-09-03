@@ -21,7 +21,7 @@ class DisplayManager:
         self.display = display
         self.api = api
         self.display_task = None
-        self.current_sport = "MLB"
+        self.current_sport = "SPORTS"
         self.show_all_games = True  # True = show all games, False = show only active games
         self.games = []
         self.current_game_index = 0
@@ -80,8 +80,8 @@ class DisplayManager:
             home_score = str(game.get('home_score', 0))
             away_score = str(game.get('away_score', 0))
         
-            # Show sport name in the center, but not for live/postponed/delayed MLB games
-            if (game.get("status") in ["Postponed", "Delayed", "Suspended", "Cancelled"] or 
+            # Show sport name in the center, but not for live/postponed/delayed/suspended/cancelled games
+            if (game.get("status") in ["Postponed", "Delayed", "Suspended", "Cancelled", "Unknown"] or 
                 (game_sport == "MLB" and game.get("status") == "In Progress")):
                 middle_text = None
             else:
@@ -122,7 +122,7 @@ class DisplayManager:
             elif game_status == "Scheduled":
                 # Handle scheduled game display
                 self._handle_scheduled_game(game, display_data, positions)
-            elif game_status in ["Postponed", "Delayed", "Suspended", "Cancelled", "Unknown"]:
+            elif game_status in ["Postponed", "Delayed", "Suspended", "Cancelled", "Unknown"] or "Delay" in game_status:
                 # Handle postponed/delayed/suspended/cancelled/unknown game display
                 self._handle_delayed_game(game, display_data, positions)
             else:
@@ -143,6 +143,8 @@ class DisplayManager:
                         positions['away_x'], positions['home_x'], positions['center_x'],
                         positions['away_score_x'], positions['home_score_x']
                     ) or clock_text
+                    
+
                 
                 # Add clock text if available
                 if clock_text:
@@ -202,47 +204,42 @@ class DisplayManager:
 
     def _handle_delayed_game(self, game, display_data, positions):
         """Handle display for postponed/delayed/suspended/cancelled games"""
-        # Handle team records
-        away_record = game.get('away_record', '')
-        home_record = game.get('home_record', '')
-        away_record_wins, away_record_losses = parse_team_record(away_record)
-        home_record_wins, home_record_losses = parse_team_record(home_record)
-        
-        if away_record_wins and away_record_losses and home_record_wins and home_record_losses:
-            self._add_team_records(
-                display_data, positions,
-                away_record_wins, away_record_losses,
-                home_record_wins, home_record_losses
-            )
-        
         # Get status and create appropriate display text
         status = game.get('status', 'Unknown')
         display_text = self._get_status_display_text(status)
         
-        # Update display data middle row with status and center it
-        display_data['middle_row'][0]['text'] = display_text
-        display_data['middle_row'][-1]['text'] = ''
-        display_data['middle_row'][0]['x'] = positions['center_x'] - (len(display_text) * 6 // 2)
+        # Completely replace the middle row with just the status, centered
+        display_data['middle_row'] = [
+            {'text': display_text, 'color': DIM_GRAY, 'x': positions['center_x'] - (len(display_text) * 6 // 2)}
+        ]
         
-        # If there are scores, show them (for delayed games that were in progress)
+        # Check if this is a rain/weather delay with scores (game was in progress)
         try:
             home_score = int(game.get('home_score', 0))
             away_score = int(game.get('away_score', 0))
         except (ValueError, TypeError):
             home_score = away_score = 0
             
-        if home_score > 0 or away_score > 0:
-            display_data['middle_row'][0]['text'] = str(away_score)
-            display_data['middle_row'][-1]['text'] = str(home_score)
-            display_data['middle_row'][0]['x'] = positions['away_score_x']
-            display_data['middle_row'][-1]['x'] = positions['home_score_x']
+        # For rain/weather delays with scores, show scores in bottom row instead of records
+        if (home_score > 0 or away_score > 0) and ('rain' in status.lower() or 'weather' in status.lower()):
+            # Show scores in bottom row, centered under their respective team names
+            display_data['bottom_row'] = [
+                {'text': str(away_score), 'color': WHITE, 'x': positions['away_score_x']},
+                {'text': str(home_score), 'color': WHITE, 'x': positions['home_score_x']}
+            ]
+        else:
+            # For other delay types (postponed, suspended, etc.), show team records
+            away_record = game.get('away_record', '')
+            home_record = game.get('home_record', '')
+            away_record_wins, away_record_losses = parse_team_record(away_record)
+            home_record_wins, home_record_losses = parse_team_record(home_record)
             
-            # Add status as bottom text
-            display_data['bottom_row'].append({
-                'text': display_text, 
-                'color': DIM_GRAY, 
-                'x': positions['center_x'] - (len(display_text) * 6 // 2)
-            })
+            if away_record_wins and away_record_losses and home_record_wins and home_record_losses:
+                self._add_team_records(
+                    display_data, positions,
+                    away_record_wins, away_record_losses,
+                    home_record_wins, home_record_losses
+                )
     
     def _get_status_display_text(self, status):
         """Convert status to appropriate display text (max 5 chars for screen space)"""
