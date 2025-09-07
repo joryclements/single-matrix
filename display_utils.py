@@ -113,20 +113,53 @@ def calculate_text_positions(home_team, away_team, home_score, away_score, char_
 
 # Sport-specific display handling functions (moved from sport_display.py)
 
-def handle_nfl_display(game, display_data, home_team, away_team):
+def handle_nfl_display(game, display_data, home_team, away_team, home_color, away_color, 
+                      create_underline_fn, away_x, home_x):
     """Handle NFL-specific display logic"""
-    if game.get('down_distance'):
-        # If we have down and distance info, show that instead of clock
-        return game.get('down_distance', '')[:10]  # Limit length
-    elif game.get('possession'):
-        # Add possession indicator if available
+    # Clear any existing underline
+    if 'underline' in display_data:
+        del display_data['underline']
+    
+    # Handle possession indicator with underline (like MLB batting indicator)
+    if game.get('possession'):
         poss_team = game.get('possession', '')
         if poss_team:
-            # Update team display with possession indicators
-            if poss_team == game['home_team']:
-                display_data['top_row'][1]['text'] = f"{home_team}<"
-            elif poss_team == game['away_team']:
-                display_data['top_row'][0]['text'] = f">{away_team}"
+            home_team_abbr = game.get('home_team', '')
+            away_team_abbr = game.get('away_team', '')
+            
+            # Add underline to show which team has possession
+            if poss_team == home_team_abbr:
+                # Home team has possession - underline home team
+                underline = create_underline_fn(len(home_team) * 6 - 1, home_color)
+                underline.x = home_x
+                underline.y = 9  # Just below the team name
+                display_data['underline'] = underline
+            elif poss_team == away_team_abbr:
+                # Away team has possession - underline away team
+                underline = create_underline_fn(len(away_team) * 6 - 1, away_color)
+                underline.x = away_x
+                underline.y = 9  # Just below the team name
+                display_data['underline'] = underline
+    
+    # Handle down and distance display
+    if game.get('down_distance'):
+        # If we have down and distance info, show that instead of clock
+        # Remove spaces except around "on" to make it more readable
+        down_distance = game.get('down_distance', '')
+        # Replace " & " with "&" but keep spaces around "on"
+        down_distance = down_distance.replace(' & ', '&').replace('on', ' on ')
+        # Remove any double spaces that might have been created
+        down_distance = down_distance.replace('  ', ' ')
+        return down_distance[:10]  # Limit to 10 chars to accommodate " on "
+    else:
+        # If no down & distance, check for timeout in last play
+        last_play = game.get('last_play', '').lower()
+        clock = game.get('game_clock', '') or game.get('clock', '')
+        
+        if 'timeout' in last_play and clock:
+            # Show "TO - 7:09" format for timeouts
+            return f"TO - {clock}"[:10]  # Limit to 10 chars
+    
     return None
 
 def handle_mlb_display(game, display_data, period, home_team, away_team, home_color, away_color, 
@@ -217,4 +250,3 @@ def handle_game_status(game, display_data, center_x, char_width):
         if clock in ['0.0', '0:00', '00:00', '0']:
             return 'END'
         return clock 
-    
