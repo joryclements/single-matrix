@@ -73,6 +73,9 @@ class SportsAPI:
                 return "Suspended"
             elif raw_status in ["Cancelled", "cancelled", "CANCELLED", "Canceled", "canceled"]:
                 return "Cancelled"
+            elif raw_status in ["End of Period", "End Period", "Between Periods", "Halftime", "Half Time", "HALFTIME"]:
+                # Handle end of period/quarter/half - these are still in progress
+                return "In Progress"
             elif any(keyword in raw_status.lower() for keyword in ["delay", "rain", "weather", "lightning"]):
                 # Handle various delay statuses (Rain Delay, Weather Delay, Lightning Delay, etc.)
                 return "Delayed"
