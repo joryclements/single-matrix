@@ -134,7 +134,11 @@ class DisplayManager:
                 
                 # Handle sport-specific display
                 if game_sport == "NFL":
-                    clock_text = handle_nfl_display(game, display_data, home_team, away_team) or clock_text
+                    clock_text = handle_nfl_display(
+                        game, display_data, home_team, away_team, 
+                        home_color, away_color, create_underline,
+                        positions['away_x'], positions['home_x']
+                    ) or clock_text
                 elif game_sport == "MLB":
                     clock_text = handle_mlb_display(
                         game, display_data, period, home_team, away_team,
