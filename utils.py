@@ -62,13 +62,13 @@ def format_game_time(date, include_date=False):
         hour_int = int(hour)
 
         if hour_int > 12:
-            time_str = f"{hour_int-12}:{minute}P"
+            time_str = f"{hour_int-12}:{minute}PM"
         elif hour_int == 12:
-            time_str = f"12:{minute}P"
+            time_str = f"12:{minute}PM"
         elif hour_int == 0:
-            time_str = f"12:{minute}A"
+            time_str = f"12:{minute}AM"
         else:
-            time_str = f"{hour_int}:{minute}A"
+            time_str = f"{hour_int}:{minute}AM"
 
         if include_date and date_part and '-' in date_part:
             # Parse "2026-02-19" -> "2/19"
