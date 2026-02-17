@@ -1,1 +1,6 @@
 settings.toml
+boot_out.txt
+sd/
+.claude/
+__pycache__/
+*.pyc

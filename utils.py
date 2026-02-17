@@ -1,7 +1,7 @@
+# Display palette: neutral colors for UI. Team/brand colors (e.g. GREEN) are in team_colors.
 from team_colors import NBA_COLORS, NFL_COLORS, NHL_COLORS, MLB_COLORS
 BLACK = 0x000000
 WHITE = 0xFFFFFF
-GREEN = 0x00FF00
 DIM_GRAY = 0x444444
 GRAY = 0x202020
 

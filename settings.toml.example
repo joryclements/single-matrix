@@ -1,6 +1,12 @@
+# Required: WiFi and API (copy to settings.toml and fill in)
 CIRCUITPY_WIFI_SSID = "your_wifi_ssid"
 CIRCUITPY_WIFI_PASSWORD = "your_wifi_password"
 API_KEY = "your_api_key"
-REFRESH_INTERVAL_LIVE=30
-REFRESH_INTERVAL_IDLE=300
-DISPLAY_INTERVAL=7
+
+# Optional: refresh/display timing (seconds)
+REFRESH_INTERVAL_LIVE = 30   # Poll API every 30s when a game is live
+REFRESH_INTERVAL_IDLE = 300  # Poll API every 5 min when no live game
+DISPLAY_INTERVAL = 7         # Show each game for 7 seconds
+
+# Optional: set to true for extra serial logging (game list, etc.)
+# DEBUG_DISPLAY = false

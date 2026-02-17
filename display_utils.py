@@ -1,5 +1,26 @@
 import displayio
-from utils import BLACK, DIM_GRAY, GREEN, WHITE
+import terminalio
+from adafruit_display_text.label import Label
+from config import (
+    DISPLAY_WIDTH,
+    CHAR_WIDTH,
+    PADDING,
+    TEAM_SPACE_CHARS,
+    UNDERLINE_Y_OFFSET,
+    DIAMOND_HALF_OFFSET,
+    DIAMOND_Y_OFFSET,
+)
+from utils import BLACK, DIM_GRAY, WHITE
+
+
+def get_text_width(text, font=None):
+    """Return pixel width of text in the given font (variable-width glyphs)."""
+    if font is None:
+        font = terminalio.FONT
+    if not text:
+        return 0
+    label = Label(font, text=str(text), color=0)
+    return label.bounding_box[2]
 
 def create_baseball_diamond(base_bitmap, base_palette, bases):
     """Create a baseball diamond using pixels with diamond shapes"""
@@ -71,44 +92,50 @@ def create_underline(width, color):
         
     return displayio.TileGrid(bitmap, pixel_shader=palette)
 
-def calculate_text_positions(home_team, away_team, home_score, away_score, char_width=6, padding=2, display_width=64):
-    """Calculate positions for team names and scores"""
-    team_space_width = 3 * char_width  # Always reserve 3 chars worth of space for team names
-    
-    # Calculate widths for scores
-    home_score_width = len(home_score) * char_width
-    away_score_width = len(away_score) * char_width
-    
-    # For away team (left side)
-    away_x = padding  # Team space starts at padding
-    # If team name is shorter than 3 chars, center it in the 3-char space
-    if len(away_team) < 3:
-        away_x = away_x + ((team_space_width - (len(away_team) * char_width)) // 2)
-    # Center score under the 3-char team space
-    away_center_width = max(team_space_width, away_score_width)
-    away_score_x = padding + ((away_center_width - away_score_width) // 2)
-        
-    # For home team (right side)
-    home_center_width = max(team_space_width, home_score_width)
-    home_base_x = display_width - team_space_width - padding  # Right edge of team space
-    # If team name is shorter than 3 chars, center it in the 3-char space
-    home_x = home_base_x
-    if len(home_team) < 3:
-        home_x = home_base_x + ((team_space_width - (len(home_team) * char_width)) // 2)
-    # Center score under the 3-char team space
-    home_score_x = home_base_x + ((home_center_width - home_score_width) // 2)
-    
-    # Calculate center point
-    away_right_edge = padding + max(team_space_width, away_score_width)
-    home_left_edge = home_base_x
-    center_x = away_right_edge + (home_left_edge - away_right_edge) // 2
+def calculate_text_positions(home_team, away_team, home_score, away_score, char_width=None, padding=None, display_width=None, font=None):
+    """Calculate positions for team names and scores using actual pixel widths (64x32 layout)."""
+    if display_width is None:
+        display_width = DISPLAY_WIDTH
+    if char_width is None:
+        char_width = CHAR_WIDTH
+    if padding is None:
+        padding = PADDING
+    if font is None:
+        font = terminalio.FONT
+    team_space_min = TEAM_SPACE_CHARS * char_width
+
+    away_team_w = get_text_width(away_team, font)
+    away_score_w = get_text_width(away_score, font)
+    home_team_w = get_text_width(home_team, font)
+    home_score_w = get_text_width(home_score, font)
+
+    # Use same column width for both sides so team names center symmetrically (e.g. LA and CHC)
+    col_w = max(
+        away_team_w, away_score_w,
+        home_team_w, home_score_w,
+        team_space_min,
+    )
+    away_col_w = home_col_w = col_w
+
+    # Left column: center team and score in reserved width
+    away_x = padding + (away_col_w - away_team_w) // 2
+    away_score_x = padding + (away_col_w - away_score_w) // 2
+
+    # Right column: center team and score in reserved width (same as left)
+    home_base_x = display_width - padding - home_col_w
+    home_x = home_base_x + (home_col_w - home_team_w) // 2
+    home_score_x = home_base_x + (home_col_w - home_score_w) // 2
+
+    away_right_edge = padding + away_col_w
+    center_x = away_right_edge + (home_base_x - away_right_edge) // 2
+
     return {
-        'away_x': away_x,
-        'home_x': home_x,
-        'away_score_x': away_score_x,
-        'home_score_x': home_score_x,
-        'center_x': center_x,
-        'team_space_width': team_space_width
+        "away_x": away_x,
+        "home_x": home_x,
+        "away_score_x": away_score_x,
+        "home_score_x": home_score_x,
+        "center_x": center_x,
+        "team_space_width": team_space_min,
     }
 
 # Sport-specific display handling functions (moved from sport_display.py)
@@ -129,16 +156,16 @@ def handle_nfl_display(game, display_data, home_team, away_team, home_color, awa
             
             # Add underline to show which team has possession
             if poss_team == home_team_abbr:
-                # Home team has possession - underline home team
-                underline = create_underline_fn(len(home_team) * 6 - 1, home_color)
+                w = min(18, max(1, get_text_width(home_team) - 1))
+                underline = create_underline_fn(w, home_color)
                 underline.x = home_x
-                underline.y = 9  # Just below the team name
+                underline.y = UNDERLINE_Y_OFFSET
                 display_data['underline'] = underline
             elif poss_team == away_team_abbr:
-                # Away team has possession - underline away team
-                underline = create_underline_fn(len(away_team) * 6 - 1, away_color)
+                w = min(18, max(1, get_text_width(away_team) - 1))
+                underline = create_underline_fn(w, away_color)
                 underline.x = away_x
-                underline.y = 9  # Just below the team name
+                underline.y = UNDERLINE_Y_OFFSET
                 display_data['underline'] = underline
     
     # Handle down and distance display
@@ -172,26 +199,24 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
 
     # Handle batting team indicator
     if period and len(period) > 0 and period[0].lower() == 't':
-        # Away team is batting
-        underline = create_underline_fn(len(away_team) * 6 - 1, away_color)
+        w = min(18, max(1, get_text_width(away_team) - 1))
+        underline = create_underline_fn(w, away_color)
         underline.x = away_x
-        underline.y = 9  # Just below the team name
+        underline.y = UNDERLINE_Y_OFFSET
         display_data['underline'] = underline
     elif period and len(period) > 0 and period[0].lower() == 'b':
-        # Home team is batting
-        underline = create_underline_fn(len(home_team) * 6 - 1, home_color)
+        w = min(18, max(1, get_text_width(home_team) - 1))
+        underline = create_underline_fn(w, home_color)
         underline.x = home_x
-        underline.y = 9
+        underline.y = UNDERLINE_Y_OFFSET
         display_data['underline'] = underline
 
     # Handle baseball diamond
     bases = game.get('bases', {})
     if bases:
-        # Create the baseball diamond bitmap
         diamond = create_baseball_diamond_fn(bases)
-        # Position the diamond in the center
-        diamond.x = center_x - 8  # Center the 15-wide bitmap
-        diamond.y = 11  # Position slightly above the middle row
+        diamond.x = center_x - DIAMOND_HALF_OFFSET
+        diamond.y = DIAMOND_Y_OFFSET
         
         # Store the diamond in a special key for the display function
         display_data['diamond'] = diamond
@@ -207,25 +232,25 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
         strikes = count_dict.get('strikes', 0)
         outs = count_dict.get('outs', 0)
         
-        # Calculate score widths
-        away_score_width = len(str(game['away_score'])) * 6
-        home_score_width = len(str(game['home_score'])) * 6
-        
+        # Calculate score widths (actual pixel widths)
+        away_score_width = get_text_width(str(game['away_score']))
+        home_score_width = get_text_width(str(game['home_score']))
+
         # Add balls count under away team
         balls_text = f"B{balls}"
-        balls_width = len(balls_text) * 6
+        balls_width = get_text_width(balls_text)
         balls_x = away_score_x + (away_score_width // 2) - (balls_width // 2)
         display_data['bottom_row'].append({'text': balls_text, 'color': DIM_GRAY, 'x': balls_x})
-        
+
         # Add strikes count in center
         strikes_text = f"S{strikes}"
-        strikes_width = len(strikes_text) * 6
+        strikes_width = get_text_width(strikes_text)
         strikes_x = center_x - (strikes_width // 2)
         display_data['bottom_row'].append({'text': strikes_text, 'color': DIM_GRAY, 'x': strikes_x})
-        
+
         # Add outs count under home team
         outs_text = f"O{outs}"
-        outs_width = len(outs_text) * 6
+        outs_width = get_text_width(outs_text)
         outs_x = home_score_x + (home_score_width // 2) - (outs_width // 2)
         display_data['bottom_row'].append({'text': outs_text, 'color': DIM_GRAY, 'x': outs_x})
         
@@ -233,12 +258,12 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
     
     return ""
 
-def handle_game_status(game, display_data, center_x, char_width):
+def handle_game_status(game, display_data, center_x, char_width=None):
     """Handle different game statuses and return appropriate clock text"""
     if game["status"] == "Final":
         # Add F indicator in top row center
         final_text = "F"
-        final_width = len(final_text) * char_width
+        final_width = get_text_width(final_text)
         final_x = center_x - (final_width // 2)
         display_data['top_row'].insert(1, {'text': final_text, 'color': DIM_GRAY, 'x': final_x})
         return None

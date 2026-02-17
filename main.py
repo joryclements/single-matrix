@@ -1,209 +1,152 @@
 import os
-import wifi
 import asyncio
 import board
 import digitalio
+import displayio
 import time
-import rtc
-import socketpool
-import ssl
-import adafruit_requests
+import terminalio
 from adafruit_matrixportal.matrix import Matrix
+from adafruit_display_text.label import Label
 from api import SportsAPI
+import wifi
+from boot import connect_wifi, sync_rtc, check_wifi_reconnect
+from config import (
+    DISPLAY_WIDTH,
+    DISPLAY_HEIGHT,
+    DEBOUNCE_TIME,
+    DISPLAY_INTERVAL,
+    REFRESH_INTERVAL_LIVE,
+    REFRESH_INTERVAL_IDLE,
+    MAX_CONSECUTIVE_ERRORS,
+    WIFI_CHECK_INTERVAL,
+    LIVE_STATUSES,
+)
 from display_manager import DisplayManager
-from comprehensive_display_test import run_comprehensive_display_test
-# Constants
-DISPLAY_WIDTH = 64
-DISPLAY_HEIGHT = 32
+from run_tests import run_display_tests
+from buttons import ButtonController
+from utils import WHITE
 
 # Initialize the Matrix
 matrix = Matrix(width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, bit_depth=6)
 display = matrix.display
 
-# Set up buttons
+
+def _show_boot_message(text):
+    """Show short text centered on the matrix (fits 64x32). Use 4–6 chars to avoid truncation."""
+    group = displayio.Group()
+    label = Label(terminalio.FONT, text=text, color=WHITE)
+    label.anchor_point = (0.5, 0.5)
+    label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
+    group.append(label)
+    display.root_group = group
+
+
+# Set up buttons and controller (no globals)
 button_up = digitalio.DigitalInOut(board.BUTTON_UP)
 button_up.direction = digitalio.Direction.INPUT
 button_up.pull = digitalio.Pull.UP
-
 button_down = digitalio.DigitalInOut(board.BUTTON_DOWN)
 button_down.direction = digitalio.Direction.INPUT
 button_down.pull = digitalio.Pull.UP
+button_controller = ButtonController(button_up, button_down, debounce_seconds=DEBOUNCE_TIME)
 
-# Connect to WiFi with retry logic
-print("Connecting to WiFi...")
-wifi_retries = 3
-for attempt in range(wifi_retries):
-    try:
-        wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
-        print(f"Connected to WiFi! IP: {wifi.radio.ipv4_address}")
-        break
-    except Exception as e:
-        print(f"WiFi connection attempt {attempt + 1} failed: {e}")
-        if attempt < wifi_retries - 1:
-            print("Retrying WiFi connection...")
-            time.sleep(5)
-        else:
-            print("Failed to connect to WiFi after all attempts")
-            # Could potentially continue with cached data if available
-
-# Synchronize time using world time API with fallback
-print("Synchronizing time...")
-pool = socketpool.SocketPool(wifi.radio)
-requests = adafruit_requests.Session(pool, ssl.create_default_context())
-
-time_synced = False
-time_urls = [
-    ("http://worldtimeapi.org/api/timezone/UTC", "datetime"),
-    ("http://timeapi.io/api/time/current/zone?timeZone=UTC", "dateTime"),
-]
-
-for url, key in time_urls:
-    if time_synced:
-        break
-    for attempt in range(2):
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                time_data = response.json()
-                datetime_str = time_data[key][:19]
-                year = int(datetime_str[0:4])
-                month = int(datetime_str[5:7])
-                day = int(datetime_str[8:10])
-                hour = int(datetime_str[11:13])
-                minute = int(datetime_str[14:16])
-                second = int(datetime_str[17:19])
-                rtc.RTC().datetime = time.struct_time((year, month, day, hour, minute, second, 0, 0, -1))
-                print(f"Time synchronized: {rtc.RTC().datetime}")
-                time_synced = True
-                break
-            else:
-                print(f"Time API returned {response.status_code}: {url}")
-        except Exception as e:
-            print(f"Time sync attempt failed ({url}): {e}")
-        time.sleep(2)
-
-if not time_synced:
-    print("WARNING: Time sync failed - game filtering may be inaccurate")
+# Boot: WiFi and RTC (short messages so they fit on 64px and don’t show as ..ng tim..)
+_show_boot_message("WiFi")
+connect_wifi()
+_show_boot_message("Sync")
+sync_rtc()
 
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
 display_manager = DisplayManager(display, api)
 
-# Button state tracking
-last_button_up_state = True
-last_button_up_time = 0
-last_button_down_state = True
-last_button_down_time = 0
-DEBOUNCE_TIME = 0.3  # 300ms debounce
-
-def check_wifi_connection():
-    """Check if WiFi is still connected and reconnect if needed"""
-    try:
-        if not wifi.radio.connected:
-            print("WiFi disconnected, attempting reconnection...")
-            wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
-            print("WiFi reconnected successfully")
-            return True
-        return True
-    except Exception as e:
-        print(f"WiFi reconnection failed: {e}")
-        return False
-
-async def check_buttons():
-    """Check button states and handle presses"""
-    global last_button_up_state, last_button_up_time, last_button_down_state, last_button_down_time
-    
-    current_time = time.monotonic()
-    fetch_data = False
-    
-    # Check UP button (toggle between all games and active/scheduled games)
-    current_button_up_state = button_up.value
-    if not current_button_up_state and last_button_up_state and (current_time - last_button_up_time) > DEBOUNCE_TIME:
-        # print("UP button pressed - toggling game display mode")
-        fetch_data, reset_display = display_manager.toggle_game_display()
-        if fetch_data or reset_display:
-            last_button_up_time = current_time
-            
-            # Fetch data
-            await display_manager.update_games()
-            
-            # Reset display timers by returning True
-            fetch_data = True
-    
-    last_button_up_state = current_button_up_state
-    
-    # Check DOWN button (toggle between sports)
-    current_button_down_state = button_down.value
-    if not current_button_down_state and last_button_down_state and (current_time - last_button_down_time) > DEBOUNCE_TIME:
-        # print("DOWN button pressed - toggling sport")
-        fetch_data, reset_display = display_manager.toggle_sport()
-        if fetch_data or reset_display:
-            last_button_down_time = current_time
-            # Fetch data
-            await display_manager.update_games()
-            
-            # Reset display timers by returning True
-            fetch_data = True
-    
-    last_button_down_state = current_button_down_state
-    return fetch_data
+async def run_quick_test():
+    """Run the quick display test suite."""
+    await run_display_tests(display_manager, "quick")
 
 async def run_comprehensive_test():
-    """Run the comprehensive test suite"""
-    print("🚀 Starting Comprehensive Test Suite...")
-    await run_comprehensive_display_test(display_manager, "comprehensive")
+    """Run the full display test suite."""
+    await run_display_tests(display_manager, "comprehensive")
 
-async def run_quick_test():
-    """Run a quick test suite"""
-    print("⚡ Starting Quick Test Suite...")
-    await run_comprehensive_display_test(display_manager, "quick")
+
+def _refresh_interval_for_games(games):
+    """Return refresh interval (seconds) based on whether any game is live."""
+    has_live = any(g.get("status") in LIVE_STATUSES for g in games) if games else False
+    return REFRESH_INTERVAL_LIVE if has_live else REFRESH_INTERVAL_IDLE
+
+
+async def _do_fetch_phase():
+    """Run fetch phase; returns (success, new_interval). On error returns (False, None)."""
+    try:
+        await display_manager.update_games()
+        return (True, _refresh_interval_for_games(display_manager.games))
+    except Exception as e:
+        print(f"Error updating games: {e}")
+        return (False, None)
+
+
+async def _do_display_phase():
+    """Run display phase. Returns True on success. On error may show Display Issue and sleep."""
+    try:
+        await display_manager.display_current_game()
+        return True
+    except (OSError, RuntimeError) as e:
+        print(f"Display error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        current_games = display_manager.get_filtered_games()
+        if current_games and display_manager.current_game_index < len(current_games):
+            g = current_games[display_manager.current_game_index]
+            print(f"Game: {g.get('away_team', '?')} vs {g.get('home_team', '?')}")
+        return False
+
 
 async def main():
     """Main program loop"""
     try:
-        # Show startup message
         display_manager.display_static_text("Starting")
         await asyncio.sleep(0.5)
-        
-        # Fetch initial data with error handling
-        print("Starting display...")
-        
         try:
-            # Fetch data
             await display_manager.update_games()
         except Exception as e:
             print(f"Error fetching initial data: {e}")
             display_manager.display_static_text("Init\nError")
             await asyncio.sleep(3)
-        # Run the display manager with button checking
         last_update = 0
         last_display_time = 0
-        display_interval = os.getenv("DISPLAY_INTERVAL", 7)  # Show each game for 7 seconds
-        refresh_interval_live = int(os.getenv("REFRESH_INTERVAL_LIVE", 30))
-        refresh_interval_idle = int(os.getenv("REFRESH_INTERVAL_IDLE", 300))
-        refresh_interval = refresh_interval_idle  # Start with idle interval
+        refresh_interval = REFRESH_INTERVAL_IDLE
         error_count = 0
-        max_errors = 5  # Maximum consecutive errors before entering safe mode
         last_wifi_check = 0
-        wifi_check_interval = 60  # Check WiFi every 60 seconds
         
         while True:
             try:
                 current_time = time.monotonic()
-                
-                # Periodically check WiFi connection
-                if current_time - last_wifi_check >= wifi_check_interval:
+
+                # Phase 1: if WiFi is down, show message and wait until it comes back
+                if not wifi.radio.connected:
+                    display_manager.display_static_text("WiFi\nDown")
+                    while not wifi.radio.connected:
+                        check_wifi_reconnect()
+                        if not wifi.radio.connected:
+                            await asyncio.sleep(5)
+                    last_wifi_check = current_time
+                    last_update = 0
+                    last_display_time = 0
+                    continue
+
+                # Phase 1b: periodic WiFi check when connected
+                if current_time - last_wifi_check >= WIFI_CHECK_INTERVAL:
                     try:
-                        check_wifi_connection()
+                        check_wifi_reconnect()
                         last_wifi_check = current_time
-                    except Exception as e:
-                        print(f"Error checking WiFi: {e}")
-                
-                # Check buttons and see if we need to fetch data
+                    except OSError as e:
+                        print(f"WiFi check failed: {e}")
+
+                # Phase 2: buttons (may trigger fetch and reset timers)
                 try:
-                    fetch_data = await check_buttons()
-                except Exception as e:
-                    print(f"Error checking buttons: {e}")
+                    fetch_data = await button_controller.check(display_manager)
+                except OSError as e:
+                    print(f"Error reading buttons: {e}")
                     fetch_data = False
                 
                 # If fetch_data is True, reset our timers to force immediate display
@@ -212,98 +155,62 @@ async def main():
                     last_display_time = 0  # Force immediate display
                     continue
                 
-                # Update games every refresh_interval seconds
+                # Phase 3: refresh games on interval
                 if current_time - last_update >= refresh_interval:
-                    try:
-                        await display_manager.update_games()
+                    ok, new_interval = await _do_fetch_phase()
+                    if ok:
                         last_update = current_time
-                        error_count = 0  # Reset error count on successful operation
-                        # Adjust polling rate based on game state
-                        live_statuses = ["In Progress", "Delayed", "Suspended"]
-                        has_live = any(g.get("status") in live_statuses for g in display_manager.games)
-                        new_interval = refresh_interval_live if has_live else refresh_interval_idle
-                        if new_interval != refresh_interval:
-                            print(f"Refresh interval: {refresh_interval}s -> {new_interval}s ({'live games' if has_live else 'no live games'})")
+                        error_count = 0
+                        if new_interval and new_interval != refresh_interval:
+                            print(f"Refresh: {refresh_interval}s -> {new_interval}s")
                             refresh_interval = new_interval
-                        print(f"Next refresh in {refresh_interval}s ({'LIVE' if has_live else 'IDLE'})")
-                    except Exception as e:
-                        print(f"Error updating games: {e}")
+                    else:
                         error_count += 1
-                        if error_count >= max_errors:
-                            print("Too many consecutive errors, entering safe mode")
+                        if error_count >= MAX_CONSECUTIVE_ERRORS:
                             display_manager.display_static_text("Safe\nMode")
-                            await asyncio.sleep(30)  # Wait longer in safe mode
-                            error_count = 0  # Reset after safe mode
+                            await asyncio.sleep(30)
+                            error_count = 0
                         else:
-                            last_update = current_time  # Still update timer to avoid rapid retries
+                            last_update = current_time
                     continue
-                
-                # Display current game every display_interval seconds
-                if current_time - last_display_time >= display_interval:
-                    try:
-                        await display_manager.display_current_game()
+
+                # Phase 4: advance display (hardware boundary)
+                if current_time - last_display_time >= DISPLAY_INTERVAL:
+                    if await _do_display_phase():
                         last_display_time = current_time
-                        error_count = 0  # Reset error count on successful operation
-                    except Exception as e:
-                        print(f"Error displaying game: {e}")
-                        print(f"Error type: {type(e)}")
-                        try:
-                            import traceback
-                            print(f"Full traceback:\n{traceback.format_exc()}")
-                        except:
-                            print("Could not get traceback")
-                        
-                        # Try to get current game info for debugging
-                        try:
-                            current_games = display_manager.get_filtered_games()
-                            if current_games and display_manager.current_game_index < len(current_games):
-                                current_game = current_games[display_manager.current_game_index]
-                                print(f"Problematic game: {current_game.get('away_team', 'UNK')} vs {current_game.get('home_team', 'UNK')}")
-                                print(f"Game status: {current_game.get('status', 'UNK')}")
-                        except:
-                            print("Could not get current game info")
-                            
+                        error_count = 0
+                    else:
                         error_count += 1
-                        if error_count >= max_errors:
-                            print("Too many display errors, showing error message")
-                            display_manager.display_static_text("Display\nIssue")
+                        current_games = display_manager.get_filtered_games()
+                        if error_count >= MAX_CONSECUTIVE_ERRORS:
+                            try:
+                                display_manager.display_static_text("Display\nIssue")
+                            except (OSError, RuntimeError):
+                                pass
                             await asyncio.sleep(10)
                             error_count = 0
                         else:
-                            # Skip to next game to avoid getting stuck on the same problematic game
-                            try:
-                                display_manager.current_game_index = (display_manager.current_game_index + 1) % len(display_manager.get_filtered_games())
-                                print(f"Skipping to next game, index now: {display_manager.current_game_index}")
-                            except:
-                                print("Could not skip to next game")
-                        
-                        last_display_time = current_time  # Still update timer
+                            n = len(current_games) if current_games else 1
+                            display_manager.current_game_index = (display_manager.current_game_index + 1) % n
+                        last_display_time = current_time
                 
                 # Small delay to avoid consuming too much CPU
                 await asyncio.sleep(0.1)
                 
             except Exception as e:
-                print(f"Critical error in main loop: {e}")
-                print(f"Critical error type: {type(e)}")
-                try:
-                    import traceback
-                    print(f"Critical error traceback:\n{traceback.format_exc()}")
-                except:
-                    print("Could not get critical error traceback")
-                    
+                print(f"Critical: {e}")
+                import traceback
+                print(traceback.format_exc())
                 error_count += 1
-                if error_count >= max_errors:
-                    print("Critical system error, restarting display")
+                if error_count >= MAX_CONSECUTIVE_ERRORS:
                     try:
                         display_manager.display_static_text("System\nRestart")
-                        await asyncio.sleep(10)
-                        # Reset everything
-                        last_update = 0
-                        last_display_time = 0
-                        error_count = 0
-                    except:
-                        print("Cannot display error message, continuing...")
-                        await asyncio.sleep(5)
+                    except (OSError, RuntimeError):
+                        pass
+                    await asyncio.sleep(10)
+                    last_update = 0
+                    last_display_time = 0
+                    error_count = 0
                 else:
                     await asyncio.sleep(5)
         
