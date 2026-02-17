@@ -46,30 +46,44 @@ for attempt in range(wifi_retries):
             print("Failed to connect to WiFi after all attempts")
             # Could potentially continue with cached data if available
 
-# Synchronize time using world time API
+# Synchronize time using world time API with fallback
 print("Synchronizing time...")
-try:
-    pool = socketpool.SocketPool(wifi.radio)
-    requests = adafruit_requests.Session(pool, ssl.create_default_context())
-    response = requests.get("http://worldtimeapi.org/api/timezone/UTC")
-    if response.status_code == 200:
-        time_data = response.json()
-        # Parse datetime string like "2024-06-28T15:30:45.123456+00:00"
-        datetime_str = time_data["datetime"][:19]  # Get just "2024-06-28T15:30:45"
-        year = int(datetime_str[0:4])
-        month = int(datetime_str[5:7])
-        day = int(datetime_str[8:10])
-        hour = int(datetime_str[11:13])
-        minute = int(datetime_str[14:16])
-        second = int(datetime_str[17:19])
-        
-        # Set RTC time (year, month, day, hour, minute, second, weekday, yearday)
-        rtc.RTC().datetime = time.struct_time((year, month, day, hour, minute, second, 0, 0, -1))
-        print(f"Time synchronized: {rtc.RTC().datetime}")
-    else:
-        print(f"Failed to get time: {response.status_code}")
-except Exception as e:
-    print(f"Time sync failed: {e}")
+pool = socketpool.SocketPool(wifi.radio)
+requests = adafruit_requests.Session(pool, ssl.create_default_context())
+
+time_synced = False
+time_urls = [
+    ("http://worldtimeapi.org/api/timezone/UTC", "datetime"),
+    ("http://timeapi.io/api/time/current/zone?timeZone=UTC", "dateTime"),
+]
+
+for url, key in time_urls:
+    if time_synced:
+        break
+    for attempt in range(2):
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                time_data = response.json()
+                datetime_str = time_data[key][:19]
+                year = int(datetime_str[0:4])
+                month = int(datetime_str[5:7])
+                day = int(datetime_str[8:10])
+                hour = int(datetime_str[11:13])
+                minute = int(datetime_str[14:16])
+                second = int(datetime_str[17:19])
+                rtc.RTC().datetime = time.struct_time((year, month, day, hour, minute, second, 0, 0, -1))
+                print(f"Time synchronized: {rtc.RTC().datetime}")
+                time_synced = True
+                break
+            else:
+                print(f"Time API returned {response.status_code}: {url}")
+        except Exception as e:
+            print(f"Time sync attempt failed ({url}): {e}")
+        time.sleep(2)
+
+if not time_synced:
+    print("WARNING: Time sync failed - game filtering may be inaccurate")
 
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
@@ -164,8 +178,10 @@ async def main():
         # Run the display manager with button checking
         last_update = 0
         last_display_time = 0
-        display_interval = os.getenv("DISPLAY_INTERVAL", 7)  # Show each game for 8 seconds
-        refresh_interval = os.getenv("REFRESH_INTERVAL", 10)  # Refresh every 10 seconds
+        display_interval = os.getenv("DISPLAY_INTERVAL", 7)  # Show each game for 7 seconds
+        refresh_interval_live = int(os.getenv("REFRESH_INTERVAL_LIVE", 30))
+        refresh_interval_idle = int(os.getenv("REFRESH_INTERVAL_IDLE", 300))
+        refresh_interval = refresh_interval_idle  # Start with idle interval
         error_count = 0
         max_errors = 5  # Maximum consecutive errors before entering safe mode
         last_wifi_check = 0
@@ -202,6 +218,14 @@ async def main():
                         await display_manager.update_games()
                         last_update = current_time
                         error_count = 0  # Reset error count on successful operation
+                        # Adjust polling rate based on game state
+                        live_statuses = ["In Progress", "Delayed", "Suspended"]
+                        has_live = any(g.get("status") in live_statuses for g in display_manager.games)
+                        new_interval = refresh_interval_live if has_live else refresh_interval_idle
+                        if new_interval != refresh_interval:
+                            print(f"Refresh interval: {refresh_interval}s -> {new_interval}s ({'live games' if has_live else 'no live games'})")
+                            refresh_interval = new_interval
+                        print(f"Next refresh in {refresh_interval}s ({'LIVE' if has_live else 'IDLE'})")
                     except Exception as e:
                         print(f"Error updating games: {e}")
                         error_count += 1

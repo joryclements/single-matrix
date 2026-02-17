@@ -232,35 +232,17 @@ class SportsAPI:
                 if raw_status != status:
                     print(f"Debug: Status normalized from '{raw_status}' to '{status}'")
             
-                # Filter games to only show those within 24-hour window
-                if date:
+                # Filter out old final games (>24h), keep everything else
+                # The API already returns only relevant upcoming games
+                if date and status == "Final":
                     try:
-                        # Parse the game date (format: "2025-09-04 20:20:00")
-                        # Convert to time tuple then to timestamp
                         year, month, day = int(date[:4]), int(date[5:7]), int(date[8:10])
                         hour, minute = int(date[11:13]), int(date[14:16])
-                        
-                        # Create time tuple (year, month, day, hour, minute, second, weekday, yearday, dst)
                         game_time_tuple = (year, month, day, hour, minute, 0, 0, 0, -1)
                         game_timestamp = time.mktime(game_time_tuple)
-                        
-                        # Apply time window filtering to all games based on status
-                        if status == "Scheduled":
-                            # Skip scheduled games more than 22 hours from now to avoid confusion
-                            twenty_hours_seconds = 20 * 60 * 60
-                            if game_timestamp > now + twenty_hours_seconds:
-                                continue
-                        elif status == "Final":
-                            # Skip final games older than 24 hours (only show games from past 24 hours)
-                            if game_timestamp < now - twenty_four_hours_seconds:
-                                continue
-                        else:
-                            # For any other status (postponed, etc.), apply same 24-hour window as final games
-                            if game_timestamp < now - twenty_four_hours_seconds:
-                                continue
-                            
+                        if game_timestamp < now - twenty_four_hours_seconds:
+                            continue
                     except (ValueError, IndexError):
-                        # If date parsing fails, skip the game to be safe
                         print(f"Could not parse date for game: {date}")
                         continue
             

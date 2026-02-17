@@ -28,44 +28,57 @@ def get_team_color(team, current_sport):
         
     return color
 
-def format_game_time(date):
-    """Format game time from various date formats to 12-hour time"""
+def format_game_time(date, include_date=False):
+    """Format game time from various date formats to 12-hour time.
+    If include_date is True, prepends M/DD like '2/19 7:00PM'."""
     try:
         if not date:
             return "TBD"
-            
-        # Safely extract time part
+
+        # Extract date and time parts
+        date_part = ""
         time_part = ""
         if ' ' in date:
             parts = date.split(' ')
+            date_part = parts[0]
             if len(parts) > 1:
                 time_part = parts[1][:5] if len(parts[1]) >= 5 else parts[1]
         elif 'T' in date:
             parts = date.split('T')
+            date_part = parts[0]
             if len(parts) > 1:
                 time_part = parts[1][:5] if len(parts[1]) >= 5 else parts[1]
         else:
             time_part = date
-        
+
         if not time_part or ':' not in time_part:
             return "TBD"
-            
+
         time_parts = time_part.split(':')
         if len(time_parts) < 2:
             return "TBD"
-            
+
         hour, minute = time_parts[0], time_parts[1]
         hour_int = int(hour)
-        
+
         if hour_int > 12:
-            return f"{hour_int-12}:{minute}PM"
+            time_str = f"{hour_int-12}:{minute}P"
         elif hour_int == 12:
-            return f"12:{minute}PM"
+            time_str = f"12:{minute}P"
         elif hour_int == 0:
-            return f"12:{minute}AM"
+            time_str = f"12:{minute}A"
         else:
-            return f"{hour_int}:{minute}AM"
-            
+            time_str = f"{hour_int}:{minute}A"
+
+        if include_date and date_part and '-' in date_part:
+            # Parse "2026-02-19" -> "2/19"
+            dp = date_part.split('-')
+            month = int(dp[1])
+            day = int(dp[2])
+            return f"{month}/{day} {time_str}"
+
+        return time_str
+
     except Exception as e:
         print(f"Error formatting time '{date}': {e}")
         return "TBD"

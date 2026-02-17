@@ -195,13 +195,39 @@ class DisplayManager:
 
     def _handle_scheduled_game(self, game, display_data, positions):
         """Handle display for a scheduled game"""
-        # Format and display game time
         date = game.get('date', '')
         time_part = format_game_time(date)
         time_width = len(time_part) * 6
         time_x = positions['center_x'] - (time_width // 2)
-        
-        # Update display data
+
+        # If game is not today, replace sport label with "SPORT M/DD"
+        game_is_today = True
+        try:
+            import rtc
+            now = rtc.RTC().datetime
+            if date and '-' in date:
+                dp = date.split('-')
+                game_is_today = (int(dp[1]) == now.tm_mon and int(dp[2][:2]) == now.tm_mday)
+        except Exception:
+            pass
+
+        if not game_is_today and date and '-' in date:
+            try:
+                dp = date.split('-')
+                date_str = f"{int(dp[1])}/{int(dp[2][:2])}"
+                game_sport = game.get('sport', self.current_sport)
+                label = f"{game_sport} {date_str}"
+                # Replace the sport label in middle_row if it exists
+                for item in display_data['middle_row']:
+                    if item.get('text') == game_sport:
+                        item['text'] = label
+                        label_width = len(label) * 6
+                        item['x'] = positions['center_x'] - (label_width // 2)
+                        break
+            except Exception:
+                pass
+
+        # Clear scores and show time on bottom
         display_data['middle_row'][0]['text'] = ''
         display_data['middle_row'][-1]['text'] = ''
         display_data['bottom_row'].append({'text': time_part, 'color': WHITE, 'x': time_x})
@@ -626,7 +652,5 @@ class DisplayManager:
                 print(f"Showing active/live games: {len(active_games)} games")
                 return active_games
             else:
-                # If no active games, show upcoming scheduled games
-                scheduled_games = [g for g in self.games if g["status"] == "Scheduled"]
-                print(f"No active games found. Showing scheduled games: {len(scheduled_games)} games")
-                return scheduled_games
+                print("No active games found.")
+                return []
