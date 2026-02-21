@@ -123,15 +123,16 @@ def process_games(raw_games, sport):
             away_record = game.get("away_record", "")
 
             period = ""
-            if "quarter" in game:
-                period = game.get("quarter", "")
-            elif "game_period" in game:
-                period = game.get("game_period", "")
-            elif "inning" in game and "inning_half" in game:
+            if "inning" in game and "inning_half" in game:
                 inning = game.get("inning", "")
                 inning_half = game.get("inning_half", "")
                 if inning and inning_half and len(inning_half) > 0:
                     period = f"{inning_half[0].upper()}{inning}"
+            if not period:
+                if "quarter" in game:
+                    period = game.get("quarter", "")
+                elif "game_period" in game:
+                    period = game.get("game_period", "")
 
             clock = ""
             if "time_remaining" in game:

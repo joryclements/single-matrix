@@ -22,7 +22,6 @@ from config import (
     LIVE_STATUSES,
 )
 from display_manager import DisplayManager
-from run_tests import run_display_tests
 from buttons import ButtonController
 from utils import WHITE
 
@@ -59,14 +58,6 @@ sync_rtc()
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
 display_manager = DisplayManager(display, api)
-
-async def run_quick_test():
-    """Run the quick display test suite."""
-    await run_display_tests(display_manager, "quick")
-
-async def run_comprehensive_test():
-    """Run the full display test suite."""
-    await run_display_tests(display_manager, "comprehensive")
 
 
 def _refresh_interval_for_games(games):

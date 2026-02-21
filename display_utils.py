@@ -13,6 +13,94 @@ from config import (
 from utils import BLACK, DIM_GRAY, WHITE
 
 
+def _build_glyph_visual_bounds(font=None):
+    """Scan font bitmap to find actual visible pixel bounds for each digit glyph.
+
+    Returns a dict mapping char string -> (left_pad, right_pad) where:
+      left_pad  = transparent columns on the left inside the cell
+      right_pad = transparent columns on the right inside the cell
+    So the visual width = cell_width - left_pad - right_pad.
+    """
+    if font is None:
+        font = terminalio.FONT
+    bitmap = font.bitmap
+    bounds = {}
+    for ch in "0123456789":
+        glyph = font.get_glyph(ord(ch))
+        tw = glyph.width
+        th = glyph.height
+        # Locate this glyph's tile in the font bitmap
+        tiles_per_row = bitmap.width // tw
+        tile_row = glyph.tile_index // tiles_per_row
+        tile_col = glyph.tile_index % tiles_per_row
+        sx = tile_col * tw
+        sy = tile_row * th
+        # Scan columns left-to-right for first lit pixel
+        left_pad = 0
+        for x in range(tw):
+            col_has_pixel = False
+            for y in range(th):
+                if bitmap[sx + x, sy + y] != 0:
+                    col_has_pixel = True
+                    break
+            if col_has_pixel:
+                break
+            left_pad += 1
+        # Scan columns right-to-left for last lit pixel
+        right_pad = 0
+        for x in range(tw - 1, -1, -1):
+            col_has_pixel = False
+            for y in range(th):
+                if bitmap[sx + x, sy + y] != 0:
+                    col_has_pixel = True
+                    break
+            if col_has_pixel:
+                break
+            right_pad += 1
+        bounds[ch] = (left_pad, right_pad)
+    return bounds
+
+
+# Pre-compute at import time (runs once on boot)
+DIGIT_BOUNDS = _build_glyph_visual_bounds()
+
+
+def get_visual_record_width(text):
+    """Get the visual pixel width of a numeric string (digits only),
+    accounting for actual glyph content rather than monospace cell width."""
+    font = terminalio.FONT
+    cell_w = font.get_glyph(ord("0")).shift_x  # cell advance (e.g. 6)
+    if not text:
+        return 0
+    # Full cell width for all characters
+    total = len(text) * cell_w
+    # Subtract right padding of last char (trailing transparent pixels)
+    last_bounds = DIGIT_BOUNDS.get(text[-1])
+    if last_bounds:
+        total -= last_bounds[1]
+    # Subtract left padding of first char (leading transparent pixels)
+    first_bounds = DIGIT_BOUNDS.get(text[0])
+    if first_bounds:
+        total -= first_bounds[0]
+    return total
+
+
+def get_visual_left_pad(text):
+    """Get the left transparent padding (in pixels) of the first character."""
+    if not text:
+        return 0
+    bounds = DIGIT_BOUNDS.get(text[0])
+    return bounds[0] if bounds else 0
+
+
+def get_visual_right_pad(text):
+    """Get the right transparent padding (in pixels) of the last character."""
+    if not text:
+        return 0
+    bounds = DIGIT_BOUNDS.get(text[-1])
+    return bounds[1] if bounds else 0
+
+
 def get_text_width(text, font=None):
     """Return pixel width of text in the given font (variable-width glyphs)."""
     if font is None:

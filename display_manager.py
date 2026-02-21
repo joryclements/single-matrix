@@ -49,7 +49,6 @@ class DisplayManager:
         self.separator_palette = displayio.Palette(2)
         self.separator_palette[0] = BLACK  # Background
         self.separator_palette[1] = DIM_GRAY  # Separator color
-        # Set the separator pixels
         for y in range(4):
             self.separator_bitmap[0, y] = 1
         self._builder = GameDisplayBuilder(
@@ -109,11 +108,12 @@ class DisplayManager:
                 # Add the baseball diamond if it exists
                 if 'diamond' in display_data:
                     display_group.append(display_data['diamond'])
-                    
+
                 # Add the record separators if they exist
                 if 'separators' in display_data:
                     for separator in display_data['separators']:
                         display_group.append(separator)
+
             except Exception as e:
                 print(f"Error adding special elements: {e}")
             
@@ -379,6 +379,7 @@ class DisplayManager:
                 if DEBUG_DISPLAY:
                     print(f"Showing active/live games: {len(active_games)} games")
                 return active_games
+            # No active games: show all (scheduled, final, etc.) so something is visible
             if DEBUG_DISPLAY:
-                print("No active games found.")
-            return []
+                print("No active games; showing all games (scheduled/final)")
+            return self.games

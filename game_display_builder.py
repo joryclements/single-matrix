@@ -8,14 +8,14 @@ display_data contract (between builder and DisplayManager.display_scoreboard):
   - Rows are rendered at y positions 5, 16, 27; items may be empty string (skipped).
 """
 import displayio
-from config import DISPLAY_WIDTH, CHAR_WIDTH, PADDING, TEAM_SPACE_CHARS, SEPARATOR_Y
+from config import DISPLAY_WIDTH, PADDING, SEPARATOR_Y
 from utils import (
     BLACK, WHITE, DIM_GRAY, GRAY,
     get_team_color, format_game_time, parse_team_record,
 )
 from display_utils import (
     create_baseball_diamond, create_underline, calculate_text_positions,
-    get_text_width,
+    get_text_width, get_visual_record_width, get_visual_left_pad, get_visual_right_pad,
     handle_nfl_display, handle_mlb_display, handle_game_status,
 )
 
@@ -80,14 +80,7 @@ class GameDisplayBuilder:
             if game_status == "Final":
                 self._handle_final_game(game, display_data, positions)
             elif game_status == "Scheduled":
-                # Top row: TM1 [LEA] TM2 — league in top only, darker (GRAY); not in middle/bottom
-                league_label = game_sport if game_sport in ("NFL", "NBA", "NHL", "MLB") else "LEA"
-                league_w = get_text_width(league_label)
-                league_x = positions["center_x"] - (league_w // 2)
-                display_data["top_row"].insert(
-                    1, {"text": league_label, "color": GRAY, "x": league_x}
-                )
-                self._handle_scheduled_game(game, display_data, positions, current_sport)
+                self._handle_scheduled_game(game, display_data, positions, game_sport)
             elif game_status in ["Postponed", "Delayed", "Suspended", "Cancelled", "Unknown"] or "Delay" in str(game_status):
                 self._handle_delayed_game(game, display_data, positions)
             else:
@@ -102,7 +95,7 @@ class GameDisplayBuilder:
                         positions["away_x"], positions["home_x"]
                     ) or clock_text
                 elif game_sport == "MLB":
-                    clock_text = handle_mlb_display(
+                    handle_mlb_display(
                         game, display_data, period, home_team, away_team,
                         home_color, away_color, create_underline,
                         lambda bases: create_baseball_diamond(
@@ -110,9 +103,10 @@ class GameDisplayBuilder:
                         ),
                         positions["away_x"], positions["home_x"], positions["center_x"],
                         positions["away_score_x"], positions["home_score_x"],
-                    ) or clock_text
+                    )
+                    clock_text = None  # MLB uses B/S/O in bottom row
                 if clock_text:
-                    clock_width = len(clock_text) * 6
+                    clock_width = get_text_width(clock_text)
                     clock_x = positions["center_x"] - (clock_width // 2)
                     display_data["bottom_row"].append({"text": clock_text, "color": WHITE, "x": clock_x})
 
@@ -139,10 +133,10 @@ class GameDisplayBuilder:
                 display_data, positions, away_wins, away_losses, home_wins, home_losses
             )
 
-    def _handle_scheduled_game(self, game, display_data, positions, current_sport):
+    def _handle_scheduled_game(self, game, display_data, positions, game_sport):
         date = game.get("date", "")
         time_part = format_game_time(date)
-        time_width = len(time_part) * 6
+        time_width = get_text_width(time_part)
         time_x = positions["center_x"] - (time_width // 2)
         game_is_today = True
         try:
@@ -153,29 +147,45 @@ class GameDisplayBuilder:
                 game_is_today = int(dp[1]) == now.tm_mon and int(dp[2][:2]) == now.tm_mday
         except Exception:
             pass
-        # Remove league from middle row: only blank scores, or show date only when not today (no sport)
+
+        league_label = game_sport if game_sport in ("NFL", "NBA", "NHL", "MLB") else "LEA"
+        league_w = get_text_width(league_label)
+        league_x = positions["center_x"] - (league_w // 2)
+
+        # Clear scores from middle row
         display_data["middle_row"][0]["text"] = ""
         display_data["middle_row"][-1]["text"] = ""
         if len(display_data["middle_row"]) > 2:
             display_data["middle_row"].pop(1)
-        if not game_is_today and date and "-" in date:
-            try:
-                dp = date.split("-")
-                date_str = f"{int(dp[1])}/{int(dp[2][:2])}"
-                date_w = get_text_width(date_str)
-                date_x = positions["center_x"] - (date_w // 2)
-                display_data["middle_row"].insert(
-                    1, {"text": date_str, "color": DIM_GRAY, "x": date_x}
-                )
-            except Exception:
-                pass
+
+        if game_is_today:
+            # Within 24hr: league in middle row, no date
+            display_data["middle_row"].insert(
+                1, {"text": league_label, "color": GRAY, "x": league_x}
+            )
+        else:
+            # >24hr: league in top row, date in middle row
+            display_data["top_row"].insert(
+                1, {"text": league_label, "color": GRAY, "x": league_x}
+            )
+            if date and "-" in date:
+                try:
+                    dp = date.split("-")
+                    date_str = f"{int(dp[1])}/{int(dp[2][:2])}"
+                    date_w = get_text_width(date_str)
+                    date_x = positions["center_x"] - (date_w // 2)
+                    display_data["middle_row"].insert(
+                        1, {"text": date_str, "color": DIM_GRAY, "x": date_x}
+                    )
+                except Exception:
+                    pass
         display_data["bottom_row"].append({"text": time_part, "color": DIM_GRAY, "x": time_x})
 
     def _handle_delayed_game(self, game, display_data, positions):
         status = game.get("status", "Unknown")
         display_text = self._get_status_display_text(status)
         display_data["middle_row"] = [
-            {"text": display_text, "color": DIM_GRAY, "x": positions["center_x"] - (len(display_text) * 6 // 2)}
+            {"text": display_text, "color": DIM_GRAY, "x": positions["center_x"] - (get_text_width(display_text) // 2)}
         ]
         try:
             home_score = int(game.get("home_score", 0))
@@ -222,27 +232,50 @@ class GameDisplayBuilder:
         return status_map.get(status, status[:10].upper())
 
     def _add_team_records(self, display_data, positions, away_wins, away_losses, home_wins, home_losses):
-        away_width_wins = len(away_wins) * CHAR_WIDTH
-        away_width_losses = len(away_losses) * CHAR_WIDTH
-        home_width_wins = len(home_wins) * CHAR_WIDTH
-        home_width_losses = len(home_losses) * CHAR_WIDTH
-        away_record_x = 0
-        home_record_x = DISPLAY_WIDTH - home_width_wins - home_width_losses - PADDING
-        center_gap = home_record_x - (away_record_x + away_width_wins + away_width_losses)
-        if center_gap >= 0:
-            display_data["bottom_row"].append({"text": away_wins, "color": DIM_GRAY, "x": away_record_x})
+        SEP_W = 1   # separator bitmap width
+        GAP = 1     # 1px visual gap on each side of separator
+
+        # Visual widths (actual lit pixels, not cell widths)
+        aw_vis = get_visual_record_width(away_wins)
+        al_vis = get_visual_record_width(away_losses)
+        hw_vis = get_visual_record_width(home_wins)
+        hl_vis = get_visual_record_width(home_losses)
+
+        # Visual block: vis_wins + gap + sep + gap + vis_losses
+        away_block_vis = aw_vis + GAP + SEP_W + GAP + al_vis
+        home_block_vis = hw_vis + GAP + SEP_W + GAP + hl_vis
+
+        # Position so the first visible pixel of wins starts at PADDING from the edge.
+        # Label x must be offset left by the glyph's internal left padding.
+        away_wins_x = PADDING - get_visual_left_pad(away_wins)
+        # Separator placed 1px after the last visible pixel of wins.
+        # Last visible pixel of wins = PADDING + aw_vis - 1, so sep at PADDING + aw_vis + GAP
+        away_sep_x = PADDING + aw_vis + GAP
+        # Losses label: first visible pixel starts GAP after separator end
+        away_losses_x = away_sep_x + SEP_W + GAP - get_visual_left_pad(away_losses)
+
+        # Home side: last visible pixel of losses ends at DISPLAY_WIDTH - PADDING - 1
+        # So the losses label visual starts at DISPLAY_WIDTH - PADDING - hl_vis
+        home_losses_vis_start = DISPLAY_WIDTH - PADDING - hl_vis
+        home_losses_x = home_losses_vis_start - get_visual_left_pad(home_losses)
+        # Separator placed GAP before first visible pixel of losses
+        home_sep_x = home_losses_vis_start - GAP - SEP_W
+        # Wins visual ends GAP before separator
+        home_wins_vis_start = home_sep_x - GAP - hw_vis
+        home_wins_x = home_wins_vis_start - get_visual_left_pad(home_wins)
+
+        # Only render if the two blocks don't overlap (with at least 1px gap)
+        away_visual_end = PADDING + away_block_vis
+        home_visual_start = DISPLAY_WIDTH - PADDING - home_block_vis
+        if home_visual_start > away_visual_end:
+            display_data["bottom_row"].append({"text": away_wins, "color": DIM_GRAY, "x": away_wins_x})
+            display_data["bottom_row"].append({"text": away_losses, "color": DIM_GRAY, "x": away_losses_x})
             away_sep = displayio.TileGrid(self.separator_bitmap, pixel_shader=self.separator_palette)
-            away_sep.x = away_record_x + away_width_wins
+            away_sep.x = away_sep_x
             away_sep.y = SEPARATOR_Y
-            display_data["separators"] = [away_sep]
-            display_data["bottom_row"].append(
-                {"text": away_losses, "color": DIM_GRAY, "x": away_record_x + away_width_wins + PADDING}
-            )
-            display_data["bottom_row"].append({"text": home_wins, "color": DIM_GRAY, "x": home_record_x})
+            display_data["bottom_row"].append({"text": home_wins, "color": DIM_GRAY, "x": home_wins_x})
+            display_data["bottom_row"].append({"text": home_losses, "color": DIM_GRAY, "x": home_losses_x})
             home_sep = displayio.TileGrid(self.separator_bitmap, pixel_shader=self.separator_palette)
-            home_sep.x = home_record_x + home_width_wins
+            home_sep.x = home_sep_x
             home_sep.y = SEPARATOR_Y
-            display_data["separators"].append(home_sep)
-            display_data["bottom_row"].append(
-                {"text": home_losses, "color": DIM_GRAY, "x": home_record_x + home_width_wins + PADDING}
-            )
+            display_data["separators"] = [away_sep, home_sep]
