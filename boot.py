@@ -3,6 +3,10 @@ Boot sequence: WiFi connection and RTC time sync.
 Keeps main.py focused on the display loop.
 Print strings are kept short (e.g. "WiFi", "Sync") so if they are
 echoed to the matrix display on boot, they fit on 64px width.
+
+Set TIMEZONE in settings.toml (e.g. America/New_York) so RTC matches local
+time. Otherwise RTC is UTC and "today" for upcoming games can be wrong
+(e.g. you see the date in the center instead of the league on local today).
 """
 import os
 import time
@@ -14,10 +18,22 @@ import adafruit_requests
 
 WIFI_RETRIES = 3
 WIFI_RETRY_DELAY = 5
-TIME_URLS = [
-    ("http://timeapi.io/api/time/current/zone?timeZone=UTC", "dateTime"),
-    ("http://worldtimeapi.org/api/timezone/UTC", "datetime"),
-]
+
+# Prefer local timezone so "today" matches game dates (e.g. America/New_York).
+# If unset, uses UTC (can show date instead of league on local today).
+_TIMEZONE = os.getenv("TIMEZONE", "").strip() or None
+if _TIMEZONE:
+    # World Time API: /timezone/Region/City or /timezone/Etc/GMT-5
+    _tz_safe = _TIMEZONE.replace("/", "%2F")
+    TIME_URLS = [
+        (f"http://worldtimeapi.org/api/timezone/{_tz_safe}", "datetime"),
+        (f"http://timeapi.io/api/time/current/zone?timeZone={_tz_safe}", "dateTime"),
+    ]
+else:
+    TIME_URLS = [
+        ("http://timeapi.io/api/time/current/zone?timeZone=UTC", "dateTime"),
+        ("http://worldtimeapi.org/api/timezone/UTC", "datetime"),
+    ]
 TIME_SYNC_ATTEMPTS = 2
 TIME_SYNC_DELAY = 2
 

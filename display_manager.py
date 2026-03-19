@@ -60,7 +60,7 @@ class DisplayManager:
         """Create a text label with the given parameters"""
         return Label(terminalio.FONT, text=text, color=color, x=x, y=y)
 
-    def create_game_text(self, game, middle_text=None):
+    def create_game_text(self, game):
         """Create the display_data dict for a game. Delegates to GameDisplayBuilder."""
         return self._builder.create_game_text(game, self.current_sport)
 
@@ -72,22 +72,21 @@ class DisplayManager:
                 print("Invalid display_data: not a dictionary")
                 self.display_static_text("Data\nError")
                 return
-                
-            # Ensure required keys exist
-            required_keys = ['top_row', 'middle_row', 'bottom_row']
-            for key in required_keys:
-                if key not in display_data:
-                    display_data[key] = []
-            
+
+            # Work with a copy so we don't mutate the caller's dict
+            data = dict(display_data)
+            for key in ('top_row', 'middle_row', 'bottom_row'):
+                data.setdefault(key, [])
+
             # Create the display group
             display_group = displayio.Group()
-            
+
             # Create labels for each line (64x32 row baselines from config)
             y_positions = [ROW_Y_TOP, ROW_Y_MIDDLE, ROW_Y_BOTTOM]
-            
+
             # Display top row
             try:
-                for item in display_data['top_row']:
+                for item in data['top_row']:
                     if isinstance(item, dict) and 'text' in item:
                         label = self.create_text_label(
                             str(item['text']), 
@@ -101,17 +100,12 @@ class DisplayManager:
             
             # Add special display elements safely
             try:
-                # Add the underline if it exists
-                if 'underline' in display_data:
-                    display_group.append(display_data['underline'])
-                
-                # Add the baseball diamond if it exists
-                if 'diamond' in display_data:
-                    display_group.append(display_data['diamond'])
-
-                # Add the record separators if they exist
-                if 'separators' in display_data:
-                    for separator in display_data['separators']:
+                if 'underline' in data:
+                    display_group.append(data['underline'])
+                if 'diamond' in data:
+                    display_group.append(data['diamond'])
+                if 'separators' in data:
+                    for separator in data['separators']:
                         display_group.append(separator)
 
             except Exception as e:
@@ -119,7 +113,7 @@ class DisplayManager:
             
             # Display middle row
             try:
-                for item in display_data['middle_row']:
+                for item in data['middle_row']:
                     if isinstance(item, dict) and 'text' in item and item['text']:
                         label = self.create_text_label(
                             str(item['text']), 
@@ -133,7 +127,7 @@ class DisplayManager:
             
             # Display bottom row
             try:
-                for item in display_data['bottom_row']:
+                for item in data['bottom_row']:
                     if isinstance(item, dict) and 'text' in item and item['text']:
                         label = self.create_text_label(
                             str(item['text']), 
@@ -313,7 +307,7 @@ class DisplayManager:
             
             # Validate game data before processing
             if not self._validate_game_data(game):
-                print(f"Invalid game data, skipping: {game}")
+                print(f"Invalid game data, skipping: {game.get('away_team')} @ {game.get('home_team')} ({game.get('status')})")
                 self.current_game_index = (self.current_game_index + 1) % total_games
                 return
                 
@@ -379,7 +373,51 @@ class DisplayManager:
                 if DEBUG_DISPLAY:
                     print(f"Showing active/live games: {len(active_games)} games")
                 return active_games
-            # No active games: show all (scheduled, final, etc.) so something is visible
+            # No active games: show nearby games (finals <24h + scheduled within 36h)
+            nearby = self._get_nearby_games()
+            if nearby:
+                if DEBUG_DISPLAY:
+                    print(f"No active games; showing {len(nearby)} nearby games")
+                return nearby
+            # RTC unavailable or nothing nearby: show everything so display isn't blank
             if DEBUG_DISPLAY:
-                print("No active games; showing all games (scheduled/final)")
+                print("No nearby games; showing all games as fallback")
             return self.games
+
+    def _get_nearby_games(self):
+        """Return finals + scheduled games within 36 hours. Returns [] if RTC unavailable."""
+        try:
+            import rtc
+            import time
+            now_dt = rtc.RTC().datetime
+            now = time.mktime((
+                now_dt.tm_year, now_dt.tm_mon, now_dt.tm_mday,
+                now_dt.tm_hour, now_dt.tm_min, now_dt.tm_sec, 0, 0, -1
+            ))
+        except Exception:
+            return []
+
+        thirty_six_hours = 36 * 60 * 60
+        nearby = []
+        for game in self.games:
+            status = game.get("status", "")
+            if status == "Final":
+                # Already filtered to <24h old by games_processor
+                nearby.append(game)
+            else:
+                date = game.get("date", "")
+                if not date or "-" not in date:
+                    nearby.append(game)  # No date info, include it
+                    continue
+                try:
+                    y, m, d = int(date[:4]), int(date[5:7]), int(date[8:10])
+                    h, mn = int(date[11:13]), int(date[14:16])
+                    game_ts = time.mktime((y, m, d, h, mn, 0, 0, 0, -1))
+                    if now <= game_ts <= now + thirty_six_hours:
+                        nearby.append(game)
+                    elif DEBUG_DISPLAY:
+                        kind = "far-future" if game_ts > now + thirty_six_hours else "past"
+                        print(f"Filtered {kind} game: {game.get('away_team')} @ {game.get('home_team')} on {date}")
+                except (ValueError, IndexError):
+                    nearby.append(game)  # Can't parse date, include it
+        return nearby

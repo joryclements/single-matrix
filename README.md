@@ -45,6 +45,7 @@ A CircuitPython app for the **Adafruit Matrix Portal** (or compatible board) tha
 | `DISPLAY_INTERVAL` | Seconds each game is shown | `7` |
 | `REFRESH_INTERVAL_LIVE` | Seconds between API refreshes when a game is live | `30` |
 | `REFRESH_INTERVAL_IDLE` | Seconds between API refreshes when no live game | `300` |
+| `TIMEZONE` | Local timezone for RTC (so "today" matches game dates; avoids showing date in center on local today) | unset (UTC) |
 | `DEBUG_DISPLAY` | Extra serial logging (games list, etc.) | `false` |
 
 ## Tests
@@ -60,7 +61,7 @@ From `main.py` you can call `run_quick_test()` or `run_comprehensive_test()` (th
 ## Project layout
 
 - `main.py` — entrypoint, main loop (buttons via ButtonController)
-- `boot.py` — WiFi connect, RTC sync, WiFi recheck (with retries)
+ - `boot.py` — WiFi connect, RTC sync, WiFi recheck (with retries)
 - `buttons.py` — ButtonController (debounced UP/DOWN, no globals)
 - `api.py` — sports API client (fetch + cache); delegates processing to `games_processor`
 - `games_processor.py` — normalize status, filter old finals, build processed game dicts

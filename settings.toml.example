@@ -8,5 +8,9 @@ REFRESH_INTERVAL_LIVE = 30   # Poll API every 30s when a game is live
 REFRESH_INTERVAL_IDLE = 300  # Poll API every 5 min when no live game
 DISPLAY_INTERVAL = 7         # Show each game for 7 seconds
 
+# Optional: local timezone so "today" matches game dates (avoids showing date in center on local today)
+# Examples: "America/New_York", "America/Los_Angeles", "America/Chicago"
+# TIMEZONE = "America/New_York"
+
 # Optional: set to true for extra serial logging (game list, etc.)
 # DEBUG_DISPLAY = false
