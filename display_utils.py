@@ -236,26 +236,23 @@ def handle_nfl_display(game, display_data, home_team, away_team, home_color, awa
         del display_data['underline']
     
     # Handle possession indicator with underline (like MLB batting indicator)
-    if game.get('possession'):
-        poss_team = game.get('possession', '')
-        if poss_team:
-            home_team_abbr = game.get('home_team', '')
-            away_team_abbr = game.get('away_team', '')
-            
-            # Add underline to show which team has possession
-            if poss_team == home_team_abbr:
-                w = min(18, max(1, get_text_width(home_team) - 1))
-                underline = create_underline_fn(w, home_color)
-                underline.x = home_x
-                underline.y = UNDERLINE_Y_OFFSET
-                display_data['underline'] = underline
-            elif poss_team == away_team_abbr:
-                w = min(18, max(1, get_text_width(away_team) - 1))
-                underline = create_underline_fn(w, away_color)
-                underline.x = away_x
-                underline.y = UNDERLINE_Y_OFFSET
-                display_data['underline'] = underline
-    
+    poss_team = game.get('possession', '')
+    if poss_team:
+        home_team_abbr = game.get('home_team', '')
+        away_team_abbr = game.get('away_team', '')
+        if poss_team == home_team_abbr:
+            w = min(18, max(1, get_text_width(home_team) - 1))
+            underline = create_underline_fn(w, home_color)
+            underline.x = home_x
+            underline.y = UNDERLINE_Y_OFFSET
+            display_data['underline'] = underline
+        elif poss_team == away_team_abbr:
+            w = min(18, max(1, get_text_width(away_team) - 1))
+            underline = create_underline_fn(w, away_color)
+            underline.x = away_x
+            underline.y = UNDERLINE_Y_OFFSET
+            display_data['underline'] = underline
+
     # Handle down and distance display
     if game.get('down_distance'):
         # If we have down and distance info, show that instead of clock
@@ -346,7 +343,7 @@ def handle_mlb_display(game, display_data, period, home_team, away_team, home_co
     
     return ""
 
-def handle_game_status(game, display_data, center_x, char_width=None):
+def handle_game_status(game, display_data, center_x):
     """Handle different game statuses and return appropriate clock text"""
     if game["status"] == "Final":
         # Add F indicator in top row center

@@ -54,7 +54,6 @@ class SportsAPI:
                         print(f"Using cached data for {sport}")
                         return self._cache[sport]
                     return []
-        return []
 
     def _get_raw_games(self, sport):
         """GET raw games list from API. Returns list of dicts or None on failure."""

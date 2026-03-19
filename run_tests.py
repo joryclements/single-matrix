@@ -1,10 +1,9 @@
 """
-Unified test runner for display tests.
+Unified test runner. Single entry point for all display tests.
 Modes: quick | comprehensive | status
 """
 import asyncio
-from comprehensive_display_test import run_comprehensive_display_test
-from test_status import run_status_tests
+from comprehensive_display_test import run_comprehensive_display_test, run_status_tests
 
 
 async def run_display_tests(display_manager, mode="quick"):

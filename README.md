@@ -50,13 +50,53 @@ A CircuitPython app for the **Adafruit Matrix Portal** (or compatible board) tha
 
 ## Tests
 
-Tests are unified under **`run_tests.run_display_tests(display_manager, mode)`** with three modes:
+Two files: **`run_tests.py`** (entry point) and **`comprehensive_display_test.py`** (all test logic). Modes:
 
-- **quick** — One game per sport; short run.
-- **comprehensive** — All sports, statuses, edge cases, display modes, and sport transitions (uses shared mock data from `mock_games.py`).
+- **quick** — One game per sport (fixed mock data), with TESTING/sport banner; short run.
+- **comprehensive** — Fixed mock data (all sports × statuses, edge cases), random-games pass, display modes, sport transitions.
 - **status** — Status labels only (Rain Delay, Postponed, Suspended, Cancelled).
 
-From `main.py` you can call `run_quick_test()` or `run_comprehensive_test()` (they delegate to `run_display_tests`). To run **status** tests, call `await run_display_tests(display_manager, "status")` or run **`test_status.py`** standalone (it creates its own matrix and display manager). Mock game data lives in **`mock_games.py`** and is used by both `comprehensive_display_test.py` and `test_status.py`.
+Mock game data is in **`mock_games.py`**.
+
+### Running tests on device
+
+**From the main app**  
+In `main.py`, after `display_manager` is created, call (e.g. at startup or from a button handler):
+
+```python
+from run_tests import run_display_tests
+await run_display_tests(display_manager, mode="quick")   # or "comprehensive" or "status"
+```
+
+**Standalone (test-only run)**  
+To run tests without the full scoreboard app, temporarily use a different `code.py` on the CIRCUITPY drive:
+
+- **Status tests only:** Set `code.py` to run the test module as main:
+  ```python
+  import asyncio
+  import board
+  from adafruit_matrixportal.matrix import Matrix
+  from config import DISPLAY_WIDTH, DISPLAY_HEIGHT
+  from display_manager import DisplayManager
+  from comprehensive_display_test import run_status_tests
+
+  class MockAPI:
+      pass
+
+  matrix = Matrix(width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, bit_depth=6)
+  display_manager = DisplayManager(matrix.display, MockAPI())
+  asyncio.run(run_status_tests(display_manager))
+  ```
+
+- **Quick or comprehensive:** Boot WiFi and create the matrix/API/display manager as in `main.py`, then:
+  ```python
+  import asyncio
+  from run_tests import run_display_tests
+  # ... after display_manager is created ...
+  asyncio.run(run_display_tests(display_manager, mode="quick"))  # or "comprehensive"
+  ```
+
+Restore your original `code.py` when finished.
 
 ## Project layout
 
@@ -72,9 +112,8 @@ From `main.py` you can call `run_quick_test()` or `run_comprehensive_test()` (th
 - `team_colors.py` — team color definitions
 - `config.py` — display size, intervals, layout constants (row Y, underline, diamond, separator), env-backed settings
 - `mock_games.py` — shared mock game data for tests
-- `run_tests.py` — unified test runner (quick | comprehensive | status)
-- `comprehensive_display_test.py` — full and quick display tests
-- `test_status.py` — status-only test; run standalone or via `run_tests`
+- `run_tests.py` — test entry point; run_display_tests(display_manager, mode) for quick | comprehensive | status
+- `comprehensive_display_test.py` — all display tests (quick, comprehensive, status); run as __main__ for standalone status test
 
 ## Troubleshooting
 

@@ -36,7 +36,6 @@ class ButtonController:
             if fetch_data:
                 self._last_up_time = current_time
                 await display_manager.update_games()
-                fetch_data = True
         self._last_up_state = current_up
 
         # DOWN: cycle sport
@@ -50,7 +49,6 @@ class ButtonController:
             if fetch_data:
                 self._last_down_time = current_time
                 await display_manager.update_games()
-                fetch_data = True
         self._last_down_state = current_down
 
         return fetch_data

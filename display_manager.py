@@ -162,8 +162,6 @@ class DisplayManager:
 
     def display_static_text(self, text, color=None):
         """Display static centered text with support for newlines"""
-        # print(f"Displaying static text: {text}")
-        
         color = WHITE if color is None else color  # Default white
         
         # Create the display group

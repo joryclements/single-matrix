@@ -87,7 +87,7 @@ def parse_team_record(record):
     """Parse team record string into wins and losses"""
     try:
         record_parts = record.split('-')
-        wins = record_parts[0] if len(record_parts) > 0 else ''
+        wins = record_parts[0] if record_parts else ''
         losses = record_parts[1] if len(record_parts) > 1 else ''
         return wins, losses
     except (AttributeError, IndexError):

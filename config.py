@@ -64,5 +64,5 @@ DEBUG_DISPLAY = _bool_env("DEBUG_DISPLAY", False)
 
 # Main loop policy
 MAX_CONSECUTIVE_ERRORS = 5
-WIFI_CHECK_INTERVAL = 600 # seconds
+WIFI_CHECK_INTERVAL = 600  # seconds
 LIVE_STATUSES = ("In Progress", "Delayed", "Suspended")
