@@ -383,10 +383,11 @@ class DisplayManager:
             return self.games
 
     def _get_nearby_games(self):
-        """Return finals + scheduled games within 36 hours. Returns [] if RTC unavailable."""
+        """Return non-active games within the display time window. Returns [] if RTC unavailable."""
         try:
             import rtc
             import time
+            from games_processor import is_game_in_time_window, ACTIVE_STATUSES
             now_dt = rtc.RTC().datetime
             now = time.mktime((
                 now_dt.tm_year, now_dt.tm_mon, now_dt.tm_mday,
@@ -395,27 +396,7 @@ class DisplayManager:
         except Exception:
             return []
 
-        thirty_six_hours = 36 * 60 * 60
-        nearby = []
-        for game in self.games:
-            status = game.get("status", "")
-            if status == "Final":
-                # Already filtered to <24h old by games_processor
-                nearby.append(game)
-            else:
-                date = game.get("date", "")
-                if not date or "-" not in date:
-                    nearby.append(game)  # No date info, include it
-                    continue
-                try:
-                    y, m, d = int(date[:4]), int(date[5:7]), int(date[8:10])
-                    h, mn = int(date[11:13]), int(date[14:16])
-                    game_ts = time.mktime((y, m, d, h, mn, 0, 0, 0, -1))
-                    if now <= game_ts <= now + thirty_six_hours:
-                        nearby.append(game)
-                    elif DEBUG_DISPLAY:
-                        kind = "far-future" if game_ts > now + thirty_six_hours else "past"
-                        print(f"Filtered {kind} game: {game.get('away_team')} @ {game.get('home_team')} on {date}")
-                except (ValueError, IndexError):
-                    nearby.append(game)  # Can't parse date, include it
-        return nearby
+        return [
+            g for g in self.games
+            if g.get("status") not in ACTIVE_STATUSES and is_game_in_time_window(g, now)
+        ]

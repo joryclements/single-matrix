@@ -20,6 +20,51 @@ STATUS_MAP = {
 }
 DELAY_KEYWORDS = ("delay", "rain", "weather", "lightning")
 CANCEL_KEYWORDS = ("void", "forfeit", "abandon")
+ACTIVE_STATUSES = frozenset({"In Progress", "Delayed", "Suspended", "Unknown"})
+TWENTY_FOUR_HOURS = 24 * 60 * 60
+THIRTY_SIX_HOURS = 36 * 60 * 60
+
+
+def _parse_game_timestamp(date):
+    """Parse API date string to epoch seconds, or None if unparseable."""
+    if not date or "-" not in date:
+        return None
+    try:
+        y, m, d = int(date[:4]), int(date[5:7]), int(date[8:10])
+        h, mn = int(date[11:13]), int(date[14:16])
+        return time.mktime((y, m, d, h, mn, 0, 0, 0, -1))
+    except (ValueError, IndexError):
+        return None
+
+
+def is_game_in_time_window(game, now=None):
+    """
+    Whether a processed game falls within the display time window.
+    Active games are always included. Finals within 24h and other games
+    within the next 36h are included. Returns True when RTC is unavailable.
+    """
+    if now is None:
+        try:
+            current_time = rtc.RTC().datetime
+            now = time.mktime((
+                current_time.tm_year, current_time.tm_mon, current_time.tm_mday,
+                current_time.tm_hour, current_time.tm_min, current_time.tm_sec, 0, 0, -1
+            ))
+        except Exception:
+            return True
+
+    status = game.get("status", "")
+    if status in ACTIVE_STATUSES:
+        return True
+
+    game_ts = _parse_game_timestamp(game.get("date", ""))
+    if game_ts is None:
+        return True
+
+    if status == "Final":
+        return game_ts >= now - TWENTY_FOUR_HOURS
+
+    return now <= game_ts <= now + THIRTY_SIX_HOURS
 
 
 def normalize_and_infer_status(raw_status, game, sport):
@@ -89,7 +134,8 @@ def _infer_status_from_game_data(raw_status, game, sport):
 def process_games(raw_games, sport):
     """
     Process raw API game list into simplified display format.
-    Normalizes status, filters old finals (>24h) when RTC is available.
+    Normalizes status, filters by time window when RTC is available:
+    finals older than 24h and non-active games more than 36h in the future.
     When RTC fails, skips time-based filtering so games are not incorrectly dropped.
     """
     processed = []
@@ -102,9 +148,7 @@ def process_games(raw_games, sport):
         )
         now = time.mktime(now_tuple)
     except Exception as e:
-        print(f"RTC unavailable ({e}); skipping time-based filtering for finals")
-
-    twenty_four_hours = 24 * 60 * 60
+        print(f"RTC unavailable ({e}); skipping time-based filtering")
 
     for i, game in enumerate(raw_games):
         try:
@@ -150,20 +194,7 @@ def process_games(raw_games, sport):
             if DEBUG_DISPLAY and raw_status != status:
                 print(f"Debug: Status normalized from '{raw_status}' to '{status}'")
 
-            # Filter out finals older than 24h only when we have a valid RTC
-            if now is not None and date and status == "Final":
-                try:
-                    y, m, d = int(date[:4]), int(date[5:7]), int(date[8:10])
-                    h, mn = int(date[11:13]), int(date[14:16])
-                    game_ts = time.mktime((y, m, d, h, mn, 0, 0, 0, -1))
-                    if game_ts < now - twenty_four_hours:
-                        continue
-                except (ValueError, IndexError):
-                    if DEBUG_DISPLAY:
-                        print(f"Could not parse date for game: {date}")
-                    continue
-
-            processed.append({
+            candidate = {
                 "home_team": home_team,
                 "away_team": away_team,
                 "home_score": home_score,
@@ -180,7 +211,13 @@ def process_games(raw_games, sport):
                 "possession": possession,
                 "count": count,
                 "bases": bases,
-            })
+            }
+            if now is not None and not is_game_in_time_window(candidate, now):
+                if DEBUG_DISPLAY:
+                    print(f"Filtered out-of-window game: {away_team} @ {home_team} on {date} ({status})")
+                continue
+
+            processed.append(candidate)
             if DEBUG_DISPLAY:
                 print(f"Processed: {home_team} vs {away_team} - Status: {status}, Period: {period}, Clock: {clock}")
         except Exception as e:
