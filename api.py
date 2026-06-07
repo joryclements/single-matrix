@@ -9,6 +9,8 @@ import socketpool
 import adafruit_requests
 from games_processor import process_games
 
+REQUEST_TIMEOUT = 15  # seconds; avoid hanging fetches on slow/unreachable API
+
 
 class SportsAPI:
     """Facade: fetches raw games from API and returns processed game list."""
@@ -59,7 +61,7 @@ class SportsAPI:
         """GET raw games list from API. Returns list of dicts or None on failure."""
         url = f"{self.base_url}/{sport.lower()}/scores?api_key={self.api_key}"
         try:
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT)
             if response.status_code == 200:
                 data = response.json()
                 return data.get("games", [])

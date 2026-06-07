@@ -22,20 +22,29 @@ WIFI_RETRY_DELAY = 5
 # Prefer local timezone so "today" matches game dates (e.g. America/New_York).
 # If unset, uses UTC (can show date instead of league on local today).
 _TIMEZONE = os.getenv("TIMEZONE", "").strip() or None
-if _TIMEZONE:
-    # World Time API: /timezone/Region/City or /timezone/Etc/GMT-5
-    _tz_safe = _TIMEZONE.replace("/", "%2F")
-    TIME_URLS = [
-        (f"http://worldtimeapi.org/api/timezone/{_tz_safe}", "datetime"),
-        (f"http://timeapi.io/api/time/current/zone?timeZone={_tz_safe}", "dateTime"),
-    ]
-else:
-    TIME_URLS = [
-        ("http://timeapi.io/api/time/current/zone?timeZone=UTC", "dateTime"),
-        ("http://worldtimeapi.org/api/timezone/UTC", "datetime"),
-    ]
+
+
+def _build_time_urls():
+    """Ordered list of (url, json_key) for RTC sync. HTTPS + fallbacks for reliability."""
+    urls = []
+    if _TIMEZONE:
+        urls.append((f"https://worldtimeapi.org/api/timezone/{_TIMEZONE}", "datetime"))
+        tz_query = _TIMEZONE.replace("/", "%2F")
+        urls.append((
+            f"https://timeapi.io/api/Time/current/zone?timeZone={tz_query}",
+            "dateTime",
+        ))
+    # IP-based local time works even when timezone path URLs fail
+    urls.append(("https://worldtimeapi.org/api/ip", "datetime"))
+    urls.append(("https://worldtimeapi.org/api/timezone/UTC", "datetime"))
+    urls.append(("https://timeapi.io/api/Time/current/zone?timeZone=UTC", "dateTime"))
+    return urls
+
+
+TIME_URLS = _build_time_urls()
 TIME_SYNC_ATTEMPTS = 2
 TIME_SYNC_DELAY = 2
+TIME_SYNC_TIMEOUT = 10  # seconds; avoid hanging boot if time API is slow/unreachable
 
 
 def connect_wifi(max_retries=None):
@@ -69,7 +78,7 @@ def sync_rtc():
     for url, key in TIME_URLS:
         for attempt in range(TIME_SYNC_ATTEMPTS):
             try:
-                response = session.get(url)
+                response = session.get(url, timeout=TIME_SYNC_TIMEOUT)
                 if response.status_code == 200:
                     time_data = response.json()
                     datetime_str = time_data[key][:19]

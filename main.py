@@ -53,7 +53,8 @@ button_controller = ButtonController(button_up, button_down, debounce_seconds=DE
 _show_boot_message("WiFi")
 connect_wifi()
 _show_boot_message("Sync")
-sync_rtc()
+if not sync_rtc():
+    print("No RTC sync; time filters may be skipped")
 
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
