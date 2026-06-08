@@ -32,7 +32,7 @@ class ButtonController:
             and self._last_up_state
             and (current_time - self._last_up_time) > self.debounce
         ):
-            fetch_data, _ = display_manager.toggle_game_display()
+            fetch_data = display_manager.toggle_game_display()
             if fetch_data:
                 self._last_up_time = current_time
                 await display_manager.update_games()
@@ -45,7 +45,7 @@ class ButtonController:
             and self._last_down_state
             and (current_time - self._last_down_time) > self.debounce
         ):
-            fetch_data, _ = display_manager.toggle_sport()
+            fetch_data = display_manager.toggle_sport()
             if fetch_data:
                 self._last_down_time = current_time
                 await display_manager.update_games()

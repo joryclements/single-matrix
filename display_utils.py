@@ -13,29 +13,28 @@ from config import (
 from utils import BLACK, DIM_GRAY, WHITE
 
 
-def _build_glyph_visual_bounds(font=None):
-    """Scan font bitmap to find actual visible pixel bounds for each digit glyph.
+def _build_glyph_visual_bounds(charset, font=None):
+    """Scan font bitmap for visible pixel bounds per character.
 
-    Returns a dict mapping char string -> (left_pad, right_pad) where:
-      left_pad  = transparent columns on the left inside the cell
-      right_pad = transparent columns on the right inside the cell
-    So the visual width = cell_width - left_pad - right_pad.
+    Returns dict char -> (left_pad, right_pad) inside the glyph cell.
+    Visual width = cell_width - left_pad - right_pad.
     """
     if font is None:
         font = terminalio.FONT
     bitmap = font.bitmap
     bounds = {}
-    for ch in "0123456789":
-        glyph = font.get_glyph(ord(ch))
+    for ch in charset:
+        try:
+            glyph = font.get_glyph(ord(ch))
+        except (TypeError, AttributeError):
+            continue
         tw = glyph.width
         th = glyph.height
-        # Locate this glyph's tile in the font bitmap
         tiles_per_row = bitmap.width // tw
         tile_row = glyph.tile_index // tiles_per_row
         tile_col = glyph.tile_index % tiles_per_row
         sx = tile_col * tw
         sy = tile_row * th
-        # Scan columns left-to-right for first lit pixel
         left_pad = 0
         for x in range(tw):
             col_has_pixel = False
@@ -46,7 +45,6 @@ def _build_glyph_visual_bounds(font=None):
             if col_has_pixel:
                 break
             left_pad += 1
-        # Scan columns right-to-left for last lit pixel
         right_pad = 0
         for x in range(tw - 1, -1, -1):
             col_has_pixel = False
@@ -61,44 +59,90 @@ def _build_glyph_visual_bounds(font=None):
     return bounds
 
 
+def _glyph_cell_advance(font=None):
+    if font is None:
+        font = terminalio.FONT
+    glyph = font.get_glyph(ord("0"))
+    # shift_x is often 0 on terminalio; width is the cell advance (typically 6px)
+    return glyph.shift_x or glyph.width
+
+
 # Pre-compute at import time (runs once on boot)
-DIGIT_BOUNDS = _build_glyph_visual_bounds()
+GLYPH_BOUNDS = _build_glyph_visual_bounds("0123456789:APM")
+DIGIT_BOUNDS = GLYPH_BOUNDS
 
 
-def get_visual_record_width(text):
-    """Get the visual pixel width of a numeric string (digits only),
-    accounting for actual glyph content rather than monospace cell width."""
-    font = terminalio.FONT
-    cell_w = font.get_glyph(ord("0")).shift_x  # cell advance (e.g. 6)
+def get_visual_string_width(text):
+    """Visual pixel width of a string using glyph bounds (not cell width)."""
+    cell_w = _glyph_cell_advance()
     if not text:
         return 0
-    # Full cell width for all characters
     total = len(text) * cell_w
-    # Subtract right padding of last char (trailing transparent pixels)
-    last_bounds = DIGIT_BOUNDS.get(text[-1])
+    last_bounds = GLYPH_BOUNDS.get(text[-1])
     if last_bounds:
         total -= last_bounds[1]
-    # Subtract left padding of first char (leading transparent pixels)
-    first_bounds = DIGIT_BOUNDS.get(text[0])
+    first_bounds = GLYPH_BOUNDS.get(text[0])
     if first_bounds:
         total -= first_bounds[0]
     return total
 
 
+def get_visual_record_width(text):
+    """Visual width for record digits (alias for get_visual_string_width)."""
+    return get_visual_string_width(text)
+
+
 def get_visual_left_pad(text):
-    """Get the left transparent padding (in pixels) of the first character."""
+    """Left transparent padding (pixels) of the first character."""
     if not text:
         return 0
-    bounds = DIGIT_BOUNDS.get(text[0])
+    bounds = GLYPH_BOUNDS.get(text[0])
     return bounds[0] if bounds else 0
 
 
 def get_visual_right_pad(text):
-    """Get the right transparent padding (in pixels) of the last character."""
+    """Right transparent padding (pixels) of the last character."""
     if not text:
         return 0
-    bounds = DIGIT_BOUNDS.get(text[-1])
+    bounds = GLYPH_BOUNDS.get(text[-1])
     return bounds[1] if bounds else 0
+
+
+TIME_PART_GAP = 1
+
+
+def layout_tight_centered_time(time_str, center_x, color):
+    """Build bottom-row items for a game time with 1px gaps around the colon."""
+    if not time_str:
+        return []
+    if time_str == "TBD" or ":" not in time_str:
+        w = get_text_width(time_str)
+        return [{"text": time_str, "color": color, "x": center_x - (w // 2)}]
+
+    colon_idx = time_str.index(":")
+    hour = time_str[:colon_idx]
+    tail = time_str[colon_idx + 1:]
+    colon = ":"
+
+    hour_w = get_visual_string_width(hour)
+    colon_w = get_visual_string_width(colon)
+    tail_w = get_visual_string_width(tail)
+    total = hour_w + TIME_PART_GAP + colon_w + TIME_PART_GAP + tail_w
+
+    vis_start = center_x - (total // 2)
+    return [
+        {"text": hour, "color": color, "x": vis_start - get_visual_left_pad(hour)},
+        {
+            "text": colon,
+            "color": color,
+            "x": vis_start + hour_w + TIME_PART_GAP - get_visual_left_pad(colon),
+        },
+        {
+            "text": tail,
+            "color": color,
+            "x": vis_start + hour_w + TIME_PART_GAP + colon_w + TIME_PART_GAP - get_visual_left_pad(tail),
+        },
+    ]
 
 
 def get_text_width(text, font=None):

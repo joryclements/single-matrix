@@ -1,4 +1,3 @@
-import asyncio
 import displayio
 import terminalio
 from adafruit_display_text.label import Label
@@ -7,7 +6,7 @@ from config import (
     DISPLAY_WIDTH,
     DISPLAY_HEIGHT,
     DEBUG_DISPLAY,
-    DISPLAY_INTERVAL,
+    ACTIVE_STATUSES,
     ROW_Y_TOP,
     ROW_Y_MIDDLE,
     ROW_Y_BOTTOM,
@@ -19,7 +18,6 @@ class DisplayManager:
     def __init__(self, display, api):
         self.display = display
         self.api = api
-        self.display_task = None
         self.current_sport = "SPORTS"
         self.show_all_games = True  # True = show all games, False = show only active games
         self.games = []
@@ -37,12 +35,6 @@ class DisplayManager:
         self.base_palette[0] = BLACK  # Background
         self.base_palette[1] = BRIGHT_YELLOW  # Active base
         self.base_palette[2] = DIM_GRAY  # Empty base
-        
-        # Create a bitmap for team name underlines
-        self.underline_bitmap = displayio.Bitmap(18, 1, 2)  # 18x1 bitmap for underline
-        self.underline_palette = displayio.Palette(2)
-        self.underline_palette[0] = BLACK  # Background
-        self.underline_palette[1] = WHITE  # Underline color (will be changed per team)
         
         # Create a bitmap for record separator
         self.separator_bitmap = displayio.Bitmap(1, 4, 2)  # 1px wide, 4px tall bitmap
@@ -64,8 +56,8 @@ class DisplayManager:
         """Create the display_data dict for a game. Delegates to GameDisplayBuilder."""
         return self._builder.create_game_text(game, self.current_sport)
 
-    async def display_scoreboard(self, display_data):
-        """Display multi-line text in scoreboard format with error recovery"""
+    def display_scoreboard(self, display_data):
+        """Render multi-line scoreboard. Main loop owns DISPLAY_INTERVAL timing."""
         try:
             # Validate display_data structure
             if not isinstance(display_data, dict):
@@ -147,18 +139,9 @@ class DisplayManager:
                 self.display_static_text("Display\nFailed")
                 return
             
-            # Keep display static for configured interval (same as main loop advance)
-            await asyncio.sleep(DISPLAY_INTERVAL)
-            
         except Exception as e:
             print(f"Critical error in display_scoreboard: {e}")
             self.display_static_text("Render\nError")
-
-    def stop_display(self):
-        """Stop any active display"""
-        if self.display_task:
-            self.display_task.cancel()
-            self.display_task = None
 
     def display_static_text(self, text, color=None):
         """Display static centered text with support for newlines"""
@@ -203,18 +186,11 @@ class DisplayManager:
         self.current_game_index = 0
         self.games = []  # Clear existing games data
         
-        # Clear any cached display elements
-        if self.display_task:
-            self.display_task.cancel()
-            self.display_task = None
-        
         # Display a short message about the current sport
         mode = "ALL" if self.show_all_games else "LIVE"
         self.display_static_text(f"{mode}\n{self.current_sport}")
         print(f"Switched to {self.current_sport}")
-        
-        # Return tuple of (fetch_data, reset_display)
-        return (True, True)  # Signal that data should be fetched immediately and display should be reset
+        return True
         
     def toggle_game_display(self):
         """Toggle between showing all games and only active/upcoming games"""
@@ -227,9 +203,7 @@ class DisplayManager:
         self.display_static_text(f"{mode}\n{self.current_sport}")
         
         print(f"Now showing {'all' if self.show_all_games else 'active (or scheduled if no active)'} {self.current_sport} games")
-        
-        # Return tuple of (fetch_data, reset_display)
-        return (True, True)  # Signal that data should be fetched immediately and display should be reset
+        return True
         
     async def update_games(self):
         """Update games from API with error recovery"""
@@ -313,13 +287,7 @@ class DisplayManager:
             
             try:
                 game_text_lines = self.create_game_text(game)
-                
-                # Stop any existing display
-                self.stop_display()
-                
-                # Start new display task
-                self.display_task = asyncio.create_task(self.display_scoreboard(game_text_lines))
-                
+                self.display_scoreboard(game_text_lines)
             except Exception as e:
                 print(f"Error creating display for game: {e}")
                 self.display_static_text("Display\nError")
@@ -365,8 +333,7 @@ class DisplayManager:
                 print(f"Showing all games: {len(self.games)} games")
             return self.games
         else:
-            active_statuses = ["In Progress", "Delayed", "Suspended", "Unknown"]
-            active_games = [g for g in self.games if g["status"] in active_statuses]
+            active_games = [g for g in self.games if g["status"] in ACTIVE_STATUSES]
             if active_games:
                 if DEBUG_DISPLAY:
                     print(f"Showing active/live games: {len(active_games)} games")
@@ -384,16 +351,10 @@ class DisplayManager:
 
     def _get_nearby_games(self):
         """Return non-active games within the display time window. Returns [] if RTC unavailable."""
-        try:
-            import rtc
-            import time
-            from games_processor import is_game_in_time_window, ACTIVE_STATUSES
-            now_dt = rtc.RTC().datetime
-            now = time.mktime((
-                now_dt.tm_year, now_dt.tm_mon, now_dt.tm_mday,
-                now_dt.tm_hour, now_dt.tm_min, now_dt.tm_sec, 0, 0, -1
-            ))
-        except Exception:
+        from games_processor import is_game_in_time_window, get_rtc_now
+
+        now = get_rtc_now()
+        if now is None:
             return []
 
         return [

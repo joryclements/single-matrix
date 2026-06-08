@@ -4,7 +4,7 @@ Used by the API layer; can be tested with raw dicts without HTTP.
 """
 import time
 import rtc
-from config import DEBUG_DISPLAY
+from config import ACTIVE_STATUSES, DEBUG_DISPLAY
 
 # Normalize API status strings to canonical display status (dict lookup + keywords fallback).
 STATUS_MAP = {
@@ -20,12 +20,23 @@ STATUS_MAP = {
 }
 DELAY_KEYWORDS = ("delay", "rain", "weather", "lightning")
 CANCEL_KEYWORDS = ("void", "forfeit", "abandon")
-ACTIVE_STATUSES = frozenset({"In Progress", "Delayed", "Suspended", "Unknown"})
 TWENTY_FOUR_HOURS = 24 * 60 * 60
 THIRTY_SIX_HOURS = 36 * 60 * 60
 
 
-def _parse_game_timestamp(date):
+def get_rtc_now():
+    """Return current RTC as epoch seconds, or None if unavailable."""
+    try:
+        current_time = rtc.RTC().datetime
+        return time.mktime((
+            current_time.tm_year, current_time.tm_mon, current_time.tm_mday,
+            current_time.tm_hour, current_time.tm_min, current_time.tm_sec, 0, 0, -1
+        ))
+    except Exception:
+        return None
+
+
+def parse_game_timestamp(date):
     """Parse API date string to epoch seconds, or None if unparseable."""
     if not date or "-" not in date:
         return None
@@ -44,20 +55,15 @@ def is_game_in_time_window(game, now=None):
     within the next 36h are included. Returns True when RTC is unavailable.
     """
     if now is None:
-        try:
-            current_time = rtc.RTC().datetime
-            now = time.mktime((
-                current_time.tm_year, current_time.tm_mon, current_time.tm_mday,
-                current_time.tm_hour, current_time.tm_min, current_time.tm_sec, 0, 0, -1
-            ))
-        except Exception:
+        now = get_rtc_now()
+        if now is None:
             return True
 
     status = game.get("status", "")
     if status in ACTIVE_STATUSES:
         return True
 
-    game_ts = _parse_game_timestamp(game.get("date", ""))
+    game_ts = parse_game_timestamp(game.get("date", ""))
     if game_ts is None:
         return True
 
@@ -65,6 +71,17 @@ def is_game_in_time_window(game, now=None):
         return game_ts >= now - TWENTY_FOUR_HOURS
 
     return now <= game_ts <= now + THIRTY_SIX_HOURS
+
+
+def is_game_date_today(date):
+    """True if the game's calendar date matches the RTC day (month/day)."""
+    if not date or "-" not in date:
+        return True
+    try:
+        now = rtc.RTC().datetime
+        return int(date[5:7]) == now.tm_mon and int(date[8:10]) == now.tm_mday
+    except Exception:
+        return True
 
 
 def normalize_and_infer_status(raw_status, game, sport):
@@ -139,16 +156,9 @@ def process_games(raw_games, sport):
     When RTC fails, skips time-based filtering so games are not incorrectly dropped.
     """
     processed = []
-    now = None
-    try:
-        current_time = rtc.RTC().datetime
-        now_tuple = (
-            current_time.tm_year, current_time.tm_mon, current_time.tm_mday,
-            current_time.tm_hour, current_time.tm_min, current_time.tm_sec, 0, 0, -1
-        )
-        now = time.mktime(now_tuple)
-    except Exception as e:
-        print(f"RTC unavailable ({e}); skipping time-based filtering")
+    now = get_rtc_now()
+    if now is None:
+        print("RTC unavailable; skipping time-based filtering")
 
     for i, game in enumerate(raw_games):
         try:

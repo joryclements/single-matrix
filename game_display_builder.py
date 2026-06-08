@@ -13,9 +13,11 @@ from utils import (
     BLACK, WHITE, DIM_GRAY, GRAY,
     get_team_color, format_game_time, parse_team_record,
 )
+from games_processor import is_game_date_today
 from display_utils import (
     create_baseball_diamond, create_underline, calculate_text_positions,
-    get_text_width, get_visual_record_width, get_visual_left_pad, get_visual_right_pad,
+    get_text_width, get_visual_record_width, get_visual_left_pad,
+    layout_tight_centered_time,
     handle_nfl_display, handle_mlb_display, handle_game_status,
 )
 
@@ -136,17 +138,7 @@ class GameDisplayBuilder:
     def _handle_scheduled_game(self, game, display_data, positions, game_sport):
         date = game.get("date", "")
         time_part = format_game_time(date)
-        time_width = get_text_width(time_part)
-        time_x = positions["center_x"] - (time_width // 2)
-        game_is_today = True
-        try:
-            import rtc
-            now = rtc.RTC().datetime
-            if date and "-" in date:
-                dp = date.split("-")
-                game_is_today = int(dp[1]) == now.tm_mon and int(dp[2][:2]) == now.tm_mday
-        except Exception:
-            pass
+        game_is_today = is_game_date_today(date)
 
         league_label = game_sport if game_sport in ("NFL", "NBA", "NHL", "MLB") else "LEA"
         league_w = get_text_width(league_label)
@@ -179,7 +171,8 @@ class GameDisplayBuilder:
                     )
                 except Exception:
                     pass
-        display_data["bottom_row"].append({"text": time_part, "color": DIM_GRAY, "x": time_x})
+        for item in layout_tight_centered_time(time_part, positions["center_x"], DIM_GRAY):
+            display_data["bottom_row"].append(item)
 
     def _handle_delayed_game(self, game, display_data, positions):
         status = game.get("status", "Unknown")

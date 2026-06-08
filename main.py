@@ -19,7 +19,7 @@ from config import (
     REFRESH_INTERVAL_IDLE,
     MAX_CONSECUTIVE_ERRORS,
     WIFI_CHECK_INTERVAL,
-    LIVE_STATUSES,
+    ACTIVE_STATUSES,
 )
 from display_manager import DisplayManager
 from buttons import ButtonController
@@ -30,17 +30,32 @@ matrix = Matrix(width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, bit_depth=6)
 display = matrix.display
 
 
-def _show_boot_message(text):
-    """Show short text centered on the matrix (fits 64x32). Use 4–6 chars to avoid truncation."""
+def _show_boot_message(line1, line2=""):
+    """Show 1–2 short lines centered on the matrix (64x32). Keep lines ~8 chars."""
     group = displayio.Group()
-    label = Label(terminalio.FONT, text=text, color=WHITE)
-    label.anchor_point = (0.5, 0.5)
-    label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
-    group.append(label)
+    text = line1 if not line2 else f"{line1}\n{line2}"
+    lines = text.split("\n")
+    num_lines = len(lines)
+    if num_lines == 1:
+        y_positions = [DISPLAY_HEIGHT // 2]
+    else:
+        line_height = min(10, DISPLAY_HEIGHT // num_lines)
+        start_y = (DISPLAY_HEIGHT - (line_height * (num_lines - 1))) // 2
+        y_positions = [start_y + (i * line_height) for i in range(num_lines)]
+
+    for i, line in enumerate(lines):
+        label = Label(terminalio.FONT, text=line, color=WHITE)
+        label.anchor_point = (0.5, 0.5)
+        label.anchored_position = (DISPLAY_WIDTH // 2, y_positions[i])
+        group.append(label)
     display.root_group = group
 
 
-# Set up buttons and controller (no globals)
+def _on_boot_progress(line1, line2=""):
+    _show_boot_message(line1, line2)
+
+
+# Set up buttons and controller
 button_up = digitalio.DigitalInOut(board.BUTTON_UP)
 button_up.direction = digitalio.Direction.INPUT
 button_up.pull = digitalio.Pull.UP
@@ -49,12 +64,15 @@ button_down.direction = digitalio.Direction.INPUT
 button_down.pull = digitalio.Pull.UP
 button_controller = ButtonController(button_up, button_down, debounce_seconds=DEBOUNCE_TIME)
 
-# Boot: WiFi and RTC (short messages so they fit on 64px and don’t show as ..ng tim..)
-_show_boot_message("WiFi")
-connect_wifi()
-_show_boot_message("Sync")
-if not sync_rtc():
-    print("No RTC sync; time filters may be skipped")
+# Boot: WiFi and RTC (progress shown on matrix + serial)
+if connect_wifi(on_progress=_on_boot_progress):
+    if not sync_rtc(on_progress=_on_boot_progress):
+        print("No RTC sync; time filters may be skipped")
+else:
+    print("WiFi failed; skipping RTC sync")
+    _on_boot_progress("Clock", "No WiFi")
+
+_show_boot_message("Load", "Scores")
 
 # Initialize API and Display Manager
 api = SportsAPI(os.getenv("API_KEY"))
@@ -63,7 +81,7 @@ display_manager = DisplayManager(display, api)
 
 def _refresh_interval_for_games(games):
     """Return refresh interval (seconds) based on whether any game is live."""
-    has_live = any(g.get("status") in LIVE_STATUSES for g in games) if games else False
+    has_live = any(g.get("status") in ACTIVE_STATUSES for g in games) if games else False
     return REFRESH_INTERVAL_LIVE if has_live else REFRESH_INTERVAL_IDLE
 
 
